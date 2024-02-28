@@ -1,7 +1,8 @@
+import math
+
 import flax.linen as nn
 import jax.numpy as jnp
 import jax.random
-import math
 from jax.typing import ArrayLike
 
 
@@ -30,13 +31,13 @@ class HashGridEncoder(nn.Module):
         self.resolutions = self.resolutions.reshape((-1, 1))
 
         # offset to the l-th hash table at the l-level
-        self.table_offsets = self.table_size * jnp.arange(self.num_levels)
+        self.table_offsets = self.table_size * jnp.arange(self.num_levels, dtype=jnp.uint32)
 
         self.hash_table = self.param("hash_table",
                                      lambda key, shape: jax.random.uniform(key, shape,
                                                                            minval=-1.e-4,
                                                                            maxval=1.e-4),
-                                     (self.feature_dims, self.table_size * self.num_levels))
+                                     (self.table_size * self.num_levels, self.feature_dims))
 
     def hash_function(self, ijk: ArrayLike) -> ArrayLike:
         r"""
@@ -46,8 +47,8 @@ class HashGridEncoder(nn.Module):
         Returns:
              encoded: (num of points,) hash-encoded coordinates
         """
-        primes = jnp.array([1, 2_654_435_761, 805_459_861], dtype=jnp.int32)
-        encoded = jax.lax.reduce(ijk * primes, 0, jnp.bitwise_xor, dimensions=(2,))
+        primes = jnp.array([1, 2_654_435_761, 805_459_861], dtype=jnp.uint32)
+        encoded = jax.lax.reduce(ijk * primes, jnp.uint32(0), jnp.bitwise_xor, dimensions=(2,))
         encoded = encoded % self.table_size
         return encoded
 
@@ -62,27 +63,29 @@ class HashGridEncoder(nn.Module):
         def for_each_layer(vertices, table_offset, weight):
             r"""
             Args:
-                vertices: (nun points, 8, 3) i, j, k coordinates of the eight vertices.
+                vertices: (num points, 8, 3) i, j, k coordinates of the eight vertices.
                 table_offset: () offset to the hash table at level
                 weight: (num points, 3) interpolation weights
             Returns:
-                encoded: (feature_dims, num points) encoded coordinates
+                encoded: (num points, feature_dims) encoded features
             """
             hashed = self.hash_function(vertices)
 
             # indices of the 8 vertices to the l-th level of hash table.
             indices = hashed + table_offset
 
-            # (feature_dims, 8) features
-            features = self.hash_table[:, indices]
+            # (num points, 8, feature_dims) features
+            # FIXME: tensorboard shows this table lookup takes most of the time.
+            features = self.hash_table[indices, :]
 
             # tri-linear interpolation
-            # TODO: turn this into matrix multiplication
+            # TODO: turn this into matrix multiplication or einsum?
+            weight = weight[..., jnp.newaxis]
             one_minus_w = 1. - weight
-            f_01 = features[..., 0] * (one_minus_w[:, 0]) + features[..., 1] * weight[:, 0]
-            f_23 = features[..., 2] * (one_minus_w[:, 0]) + features[..., 3] * weight[:, 0]
-            f_45 = features[..., 4] * (one_minus_w[:, 0]) + features[..., 5] * weight[:, 0]
-            f_67 = features[..., 6] * (one_minus_w[:, 0]) + features[..., 7] * weight[:, 0]
+            f_01 = features[:, 0, :] * (one_minus_w[:, 0, :]) + features[:, 1, :] * weight[:, 0, :]
+            f_23 = features[:, 2, :] * (one_minus_w[:, 0, :]) + features[:, 3, :] * weight[:, 0, :]
+            f_45 = features[:, 4, :] * (one_minus_w[:, 0, :]) + features[:, 5, :] * weight[:, 0, :]
+            f_67 = features[:, 6, :] * (one_minus_w[:, 0, :]) + features[:, 7, :] * weight[:, 0, :]
 
             f_0123 = f_01 * (one_minus_w[:, 1]) + f_23 * weight[:, 1]
             f_4567 = f_45 * (one_minus_w[:, 1]) + f_67 * weight[:, 1]
@@ -94,7 +97,7 @@ class HashGridEncoder(nn.Module):
         # (num points, L, 3) scaled x, y, z coordinates for each level
         scaled = jax.vmap(lambda res: points * res, out_axes=1)(self.resolutions)
         # (num points, L, 3) i, j, k indices of the first vertex.
-        floors = jnp.floor(scaled).astype(jnp.int32)
+        floors = jnp.floor(scaled).astype(jnp.uint32)
         weights = scaled - floors
 
         vertices_of_cell = jnp.asarray([
@@ -106,16 +109,17 @@ class HashGridEncoder(nn.Module):
             [1, 0, 1],
             [0, 1, 1],
             [1, 1, 1],
-        ], dtype=jnp.int32)
+        ], dtype=jnp.uint32)
 
         # (num points, L, 8, 3), i, j, k coordinates of the 8 vertices where the input
         # point falls to. There are L levels of grids.
+        # TODO: use einsum?
         all_vertices = floors[:, :, jnp.newaxis, :] + vertices_of_cell[jnp.newaxis, jnp.newaxis, :]
 
         encoded_vertices = jax.vmap(for_each_layer,
                                     in_axes=(1, 0, 1),
                                     out_axes=1)(all_vertices, self.table_offsets, weights)
-        return encoded_vertices.reshape(-1, points.shape[0]).T
+        return encoded_vertices.reshape(points.shape[0], -1)
 
 
 if __name__ == "__main__":
