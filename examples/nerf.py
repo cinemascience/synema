@@ -1,0 +1,111 @@
+import jax
+import jax.numpy as jnp
+import optax
+from flax.training.train_state import TrainState
+from matplotlib import pyplot as plt
+from tqdm import tqdm
+
+from models.nerfs import NeRFModel
+from renderer.ray_gen import generate_rays
+from renderer.volume import volume_rendering_hierarchical
+from samplers.pixel import Dense, UniformRandom
+
+
+def create_train_step(key, model_coarse, model_fine, optimizer, t_near, t_far):
+    rng_coarse, rng_fine = jax.random.split(key, 2)
+    init_states = TrainState.create(apply_fn=None,
+                                    params={'params_coarse': (model_coarse.init(rng_coarse,
+                                                                                jnp.empty((1024, 3)),
+                                                                                jnp.empty((1024, 3)))),
+                                            'params_fine': (model_fine.init(rng_fine,
+                                                                            jnp.empty((1024, 3)),
+                                                                            jnp.empty((1024, 3))))},
+                                    tx=optimizer)
+
+    def loss_fn(params, inputs, target, key):
+        ray_o, ray_d = inputs
+        rgb, depth = volume_rendering_hierarchical(model_coarse.bind(params['params_coarse']),
+                                                   model_fine.bind(params['params_fine']),
+                                                   ray_o, ray_d, key,
+                                                   t_near=t_near, t_far=t_far)
+        return jnp.mean(optax.l2_loss(rgb, target.reshape(-1, 3)))
+
+    @jax.jit
+    def train_step(state, inputs, target, key):
+        loss_val, grads = jax.value_and_grad(loss_fn)(state.params, inputs, target, key)
+        new_state = state.apply_gradients(grads=grads)
+        return new_state, loss_val
+
+    return train_step, init_states
+
+
+if __name__ == '__main__':
+    # data = jnp.load("../data/tiny_nerf_data.npz")
+    data = jnp.load("../data/tangle_tiny.npz")
+
+    images = data["images"][..., :3]
+    height, width = images.shape[1], images.shape[2]
+
+    poses = data["poses"].astype(jnp.float32)
+    focal = data["focal"]
+
+    t_near = 3.0
+    t_far = 8.
+
+    key = jax.random.PRNGKey(54321)
+    model_coarse = NeRFModel(num_hidden_layers=4, num_hidden_features=64)
+    model_fine = NeRFModel(num_hidden_layers=4, num_hidden_features=64)
+
+    schedule_fn = optax.exponential_decay(init_value=5e-4, end_value=5e-5,
+                                          transition_begin=500, transition_steps=200,
+                                          decay_rate=0.8)
+    optimizer = optax.adam(learning_rate=schedule_fn)
+
+    train_step, states = create_train_step(key, model_coarse, model_fine,
+                                           optimizer, t_near, t_far)
+
+    pbar = tqdm(range(5000))
+
+    pixel_sampler = UniformRandom(width=width,
+                                  height=height,
+                                  n_samples=1024)
+
+    for i in pbar:
+        key, subkey = jax.random.split(key)
+        image_idx = jax.random.randint(subkey, (1,), minval=0, maxval=100)[0]
+
+        image = images[image_idx]
+        pose = poses[image_idx]
+
+        key, subkey = jax.random.split(key)
+        pixel_coordinates = pixel_sampler(rng=subkey)
+
+        ray_origins, ray_directions = generate_rays(pixel_coordinates,
+                                                    width=width,
+                                                    height=height,
+                                                    focal=focal,
+                                                    pose=pose)
+        target = image[pixel_coordinates[:, 0].astype(int), pixel_coordinates[:, 1].astype(int), :3]
+
+        key, subkey = jax.random.split(key)
+        states, loss = train_step(states, (ray_origins, ray_directions), target, subkey)
+        pbar.set_description("Loss %f" % loss)
+
+        if i % 100 == 0:
+            pixel_coordinates = Dense(width=width, height=height)()
+
+            ray_origins, ray_directions = generate_rays(pixel_coordinates,
+                                                        width=width,
+                                                        height=height,
+                                                        focal=focal,
+                                                        pose=poses[15])
+
+            key, _ = jax.random.split(key)
+            image_recon, depth_recon = volume_rendering_hierarchical(model_coarse.bind(states.params['params_coarse']),
+                                                                     model_fine.bind(states.params['params_fine']),
+                                                                     ray_origins,
+                                                                     ray_directions, key,
+                                                                     t_near, t_far)
+            plt.imshow(image_recon.reshape((100, 100, 3)))
+            plt.savefig(str(i).zfill(6) + "png")
+            plt.close()
