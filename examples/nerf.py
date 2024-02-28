@@ -6,8 +6,8 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 
 from models.nerfs import NeRFModel
-from renderer.ray_gen import generate_rays
-from renderer.volume import volume_rendering_hierarchical
+from renderers.ray_gen import generate_rays
+from renderers.volume import volume_rendering_hierarchical
 from samplers.pixel import Dense, UniformRandom
 
 

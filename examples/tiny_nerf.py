@@ -6,8 +6,8 @@ from flax.training.train_state import TrainState
 from tqdm import tqdm
 
 from models.nerfs import TinyNeRFModel, InstantNGP
-from renderer.ray_gen import generate_rays
-from renderer.volume import volume_rendering
+from renderers.ray_gen import generate_rays
+from renderers.volume import volume_rendering
 from samplers.pixel import Dense
 
 
