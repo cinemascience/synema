@@ -38,16 +38,16 @@ class HashGridEncoder(nn.Module):
                                                                            maxval=1.e-4),
                                      (self.feature_dims, self.table_size * self.num_levels))
 
-    def hash_function(self, xyz: ArrayLike) -> ArrayLike:
+    def hash_function(self, ijk: ArrayLike) -> ArrayLike:
         r"""
         Spatial hash function to encode xyz coordinates into hash values
         Args:
-             xyz: (num of points, 8, 3) x, y, z coordinates of input points
+             ijk: (num of points, 8, 3) i, j, k coordinates of input points
         Returns:
              encoded: (num of points,) hash-encoded coordinates
         """
         primes = jnp.array([1, 2_654_435_761, 805_459_861], dtype=jnp.int32)
-        encoded = jax.lax.reduce(xyz * primes, 0, jnp.bitwise_xor, dimensions=(2,))
+        encoded = jax.lax.reduce(ijk * primes, 0, jnp.bitwise_xor, dimensions=(2,))
         encoded = encoded % self.table_size
         return encoded
 
@@ -62,30 +62,32 @@ class HashGridEncoder(nn.Module):
         def for_each_layer(vertices, table_offset, weight):
             r"""
             Args:
-                vertices: (nun points, 8, 3) coordinates of the eight vertices.
+                vertices: (nun points, 8, 3) i, j, k coordinates of the eight vertices.
                 table_offset: () offset to the hash table at level
-                weight: interpolation weights
+                weight: (num points, 3) interpolation weights
             Returns:
                 encoded: (feature_dims, num points) encoded coordinates
             """
             hashed = self.hash_function(vertices)
 
-            # indices of the 8 vertices to l-the level of hash tables.
+            # indices of the 8 vertices to the l-th level of hash table.
             indices = hashed + table_offset
 
             # (feature_dims, 8) features
             features = self.hash_table[:, indices]
 
             # tri-linear interpolation
-            f_01 = features[..., 0] * (1. - weight[:, 0]) + features[..., 1] * weight[:, 0]
-            f_23 = features[..., 2] * (1. - weight[:, 0]) + features[..., 3] * weight[:, 0]
-            f_45 = features[..., 4] * (1. - weight[:, 0]) + features[..., 5] * weight[:, 0]
-            f_67 = features[..., 6] * (1. - weight[:, 0]) + features[..., 7] * weight[:, 0]
+            # TODO: turn this into matrix multiplication
+            one_minus_w = 1. - weight
+            f_01 = features[..., 0] * (one_minus_w[:, 0]) + features[..., 1] * weight[:, 0]
+            f_23 = features[..., 2] * (one_minus_w[:, 0]) + features[..., 3] * weight[:, 0]
+            f_45 = features[..., 4] * (one_minus_w[:, 0]) + features[..., 5] * weight[:, 0]
+            f_67 = features[..., 6] * (one_minus_w[:, 0]) + features[..., 7] * weight[:, 0]
 
-            f_0123 = f_01 * (1. - weight[:, 1]) + f_23 * weight[:, 1]
-            f_4567 = f_45 * (1. - weight[:, 1]) + f_67 * weight[:, 1]
+            f_0123 = f_01 * (one_minus_w[:, 1]) + f_23 * weight[:, 1]
+            f_4567 = f_45 * (one_minus_w[:, 1]) + f_67 * weight[:, 1]
 
-            encoded = f_0123 * (1. - weight[:, 2]) + f_4567 * weight[:, 2]
+            encoded = f_0123 * (one_minus_w[:, 2]) + f_4567 * weight[:, 2]
 
             return encoded
 
