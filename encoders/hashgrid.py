@@ -31,7 +31,7 @@ class HashGridEncoder(nn.Module):
         self.resolutions = self.resolutions.reshape((-1, 1))
 
         # offset to the l-th hash table at the l-level
-        self.table_offsets = self.table_size * jnp.arange(self.num_levels)
+        self.table_offsets = self.table_size * jnp.arange(self.num_levels, dtype=jnp.uint32)
 
         self.hash_table = self.param("hash_table",
                                      lambda key, shape: jax.random.uniform(key, shape,
@@ -47,8 +47,8 @@ class HashGridEncoder(nn.Module):
         Returns:
              encoded: (num of points,) hash-encoded coordinates
         """
-        primes = jnp.array([1, 2_654_435_761, 805_459_861])
-        encoded = jax.lax.reduce(ijk * primes, 0, jnp.bitwise_xor, dimensions=(2,))
+        primes = jnp.array([1, 2_654_435_761, 805_459_861], dtype=jnp.uint32)
+        encoded = jax.lax.reduce(ijk.astype(jnp.uint32) * primes, jnp.uint32(0), jnp.bitwise_xor, dimensions=(2,))
         encoded = encoded % self.table_size
         return encoded
 
@@ -95,7 +95,7 @@ class HashGridEncoder(nn.Module):
             return encoded
 
         # (num points, L, 3) scaled x, y, z coordinates for each level
-        scaled = jax.vmap(lambda res: points * res, out_axes=1)(self.resolutions)
+        scaled = jax.vmap(lambda res: points * res + 0.5, out_axes=1)(self.resolutions)
         # (num points, L, 3) i, j, k indices of the first vertex.
         floors = jnp.floor(scaled).astype(jnp.int32)
         weights = scaled - floors
