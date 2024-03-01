@@ -3,7 +3,7 @@ import math
 import flax.linen as nn
 import jax.numpy as jnp
 import jax.random
-from jax.typing import ArrayLike
+from jaxtyping import Array, Float, Int32, UInt32
 
 
 class HashGridEncoder(nn.Module):
@@ -39,35 +39,39 @@ class HashGridEncoder(nn.Module):
                                                                            maxval=1.e-4),
                                      (self.table_size * self.num_levels, self.feature_dims))
 
-    def hash_function(self, ijk: ArrayLike) -> ArrayLike:
+    def hash_function(self, ijk: Int32[Array, "num_of_points 8 3"]) -> UInt32[Array, "num_of_points 8"]:
         r"""
-        Spatial hash function to encode xyz coordinates into hash values
+        Spatial hash function to encode grid coordinates into hash values
         Args:
-             ijk: (num of points, 8, 3) i, j, k coordinates of input points
+             ijk: i, j, k coordinate of grid vertices
         Returns:
-             encoded: (num of points,) hash-encoded coordinates
+             encoded: hash-encoded coordinates
         """
         primes = jnp.array([1, 2_654_435_761, 805_459_861], dtype=jnp.uint32)
         encoded = jax.lax.reduce(ijk.astype(jnp.uint32) * primes, jnp.uint32(0), jnp.bitwise_xor, dimensions=(2,))
         encoded = encoded % self.table_size
         return encoded
 
-    def __call__(self, points: ArrayLike) -> ArrayLike:
+    def __call__(self, points: Float[Array, "num_of_points 3"]) -> \
+            Float[Array, "num_of_points num_levels*feature_dims"]:
         r"""
         Args:
-             points (num of points, 3) (x, y, z) coordinates of the points
+             points: (x, y, z) coordinate of points
         Returns:
-             encoded (num of points, number of levels * self.feature_dims) encoded coordinates
+             encoded: encoded features
         """
 
-        def for_each_layer(vertices, table_offset, weight):
+        def for_each_layer(vertices: Int32[Array, "num_of_points 8 3"],
+                           table_offset: jnp.uint32,
+                           weight: Float[Array, "num_of_points 3"]) -> \
+                Float[Array, "num_of_points feature_dims"]:
             r"""
             Args:
-                vertices: (num points, 8, 3) i, j, k coordinates of the eight vertices.
-                table_offset: () offset to the hash table at level
-                weight: (num points, 3) interpolation weights
+                vertices: i, j, k coordinates of the eight vertices.
+                table_offset: offset to the hash table at level
+                weight: interpolation weights
             Returns:
-                encoded: (num points, feature_dims) encoded features
+                encoded: encoded features
             """
             hashed = self.hash_function(vertices)
 
@@ -75,7 +79,7 @@ class HashGridEncoder(nn.Module):
             indices = hashed + table_offset
 
             # (num points, 8, feature_dims) features
-            # FIXME: tensorboard shows this table lookup takes most of the time.
+            # FIXME: tensorboard shows this table lookup takes most of the time when doing backpropagation.
             features = self.hash_table[indices, :]
 
             # tri-linear interpolation

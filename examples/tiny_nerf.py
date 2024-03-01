@@ -40,7 +40,7 @@ if __name__ == "__main__":
     height, width = images.shape[1], images.shape[2]
 
     poses = data["poses"].astype(jnp.float32)
-    focal = data["focal"]
+    focal = data["focal"].item()
 
     t_near = 2.0
     t_far = 8.0

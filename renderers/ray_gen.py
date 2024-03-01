@@ -1,5 +1,6 @@
 import jax.numpy as jnp
-from jax.typing import ArrayLike
+from jaxtyping import Array, Float
+
 
 # Note: camera.focal_point = camera.position + camera.distance * camera.direction
 #  pose = [ +X | +Y | +Z | P], camera.direction = -Z
@@ -38,9 +39,12 @@ def generate_perspective_rays(pixel_coordinates, width, height, fov_deg, focal, 
     return ray_origins, ray_dirs
 
 
-def generate_rays(pixel_coordinates: ArrayLike,
-                  width: int, height: int,
-                  focal: float, pose: ArrayLike) -> (ArrayLike, ArrayLike):
+def generate_rays(pixel_coordinates: Float[Array, "num_of_pixels 2"],
+                  width: int,
+                  height: int,
+                  focal: float,
+                  pose: Float[Array, "4 4"]) -> \
+        (Float[Array, "num_of_pixels 3"], Float[Array, "num_of_pixels 3"]):
     i = pixel_coordinates[..., 1]
     j = pixel_coordinates[..., 0]
 

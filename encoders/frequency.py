@@ -2,6 +2,7 @@ import flax.linen as nn
 import jax.numpy as jnp
 import jax.random
 from jax.nn.initializers import normal
+from jaxtyping import Array, Float
 
 
 class PositionalEncodingNeRF(nn.Module):
@@ -13,7 +14,8 @@ class PositionalEncodingNeRF(nn.Module):
     num_frequencies: int = 10
 
     @nn.compact
-    def __call__(self, inputs, *args, **kwargs):
+    def __call__(self, inputs: Float[Array, "num_of_points 3"], *args, **kwargs) -> Float[
+        Array, "num_of_points num_frequencies*2"]:
         # The original paper claimed to multiply input with PI before sending
         # to sin/cos.
         # However, the real implementation does not do so.

@@ -8,22 +8,23 @@ from typing import Callable
 import jax.nn as nn
 import jax.numpy as jnp
 import jax.random
-from jax.typing import ArrayLike
+from jaxtyping import Array, Float
 
 from samplers.ray import stratified_random, importance_sampling
 
 
 def sample_radiance_field(field_fn: Callable,
-                          points: ArrayLike,
-                          viewdirs: ArrayLike = None) -> (ArrayLike, ArrayLike):
+                          points: Float[Array, "num_rays num_samples_per_ray 3"],
+                          viewdirs: Float[Array, "num_rays 3"] = None) -> \
+        (Float[Array, "num_rays num_samples_per_ray 3"],
+         Float[Array, "num_rays num_samples_per_ray"]):
     """Sample radiance field
     Parameters:
         field_fn: field function mapping from position and view direction to color and density
-        points: (num_rays, num_samples_per_ray, 3) points on rays to sample the field
-        viewdirs: (num_rays, 3) normalized directional vector of rays
+        points: points on rays to sample the field
+        viewdirs: normalized directional vector of rays
     Return:
-        colors: (num_rays, num_samples_per_ray, 3)
-        opacity: (num_rays, num_samples_per_ray)
+        (colors, density) color and opacity predicted by the field function.
     """
 
     # vmap vectorize along the num_rays dimension, we also add another dimension for num_samples
@@ -33,7 +34,9 @@ def sample_radiance_field(field_fn: Callable,
 
 # Compute the accumulated transmittance T_i = exp(-sum(sigma_i delta_i))
 # where delta_i = t_{i+1} - t_i for i = [0, N-1].
-def accumulated_transmittance(opacities: ArrayLike, t_vals: ArrayLike) -> ArrayLike:
+def accumulated_transmittance(opacities: Float[Array, "num_pixels num_sample_per_ray"],
+                              t_vals: Float[Array, "num_pixels num_sample_per_ray"]) -> \
+        Float[Array, "num_pixels num_sample_per_ray"]:
     delta_t = jnp.diff(t_vals)
     # add one extra (huge) delta_N = t_{N+1} - t_N that does not
     # exist to work with the shape of sampled opacities (but
@@ -52,7 +55,11 @@ def accumulated_transmittance(opacities: ArrayLike, t_vals: ArrayLike) -> ArrayL
     return alphas * transmittance
 
 
-def volume_rendering(field_fn, ray_origins, ray_directions, rng_key, t_near=0., t_far=1.):
+def volume_rendering(field_fn: Callable,
+                     ray_origins: Float[Array, "num_rays 3"],
+                     ray_directions: Float[Array, "num_rays 3"],
+                     rng_key, t_near=0., t_far=1.) -> \
+        (Float[Array, "num_rays 3"], Float[Array, "num_rays"], Float[Array, "num_rays num_sample_per_ray"]):
     # sample points along the rays
     points, t_vals = stratified_random(ray_origins, ray_directions,
                                        t_near=t_near, t_far=t_far,
@@ -74,9 +81,12 @@ def volume_rendering(field_fn, ray_origins, ray_directions, rng_key, t_near=0., 
     return rgb, depth, weights
 
 
-def volume_rendering_hierarchical(coarse_field, fine_field,
-                                  ray_origins, ray_directions,
-                                  rng_key, t_near=0, t_far=1.):
+def volume_rendering_hierarchical(coarse_field: Callable,
+                                  fine_field: Callable,
+                                  ray_origins: Float[Array, "num_rays 3"],
+                                  ray_directions: Float[Array, "num_rays 3"],
+                                  rng_key, t_near=0, t_far=1.) -> \
+        (Float[Array, "num_rays 3"], Float[Array, "num_rays"]):
     # Sample and render with the coarse model
     points, t_vals = stratified_random(ray_origins, ray_directions,
                                        t_near=t_near, t_far=t_far,

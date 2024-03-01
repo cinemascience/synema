@@ -1,22 +1,27 @@
 import jax
 import jax.numpy as jnp
+from jaxtyping import Array, Float
 
 
-def stratified_random(ray_origins, ray_directions, t_near, t_far, n_samples, rng_key):
+def stratified_random(ray_origins: Float[Array, "num_rays 3"],
+                      ray_directions: Float[Array, "num_rays 3"],
+                      t_near, t_far, n_samples, rng_key) -> \
+        (Float[Array, "num_rays num_samples_per_ray 3"],
+         Float[Array, "num_rays num_samples_per_ray"]):
     """
     Stratified random sampling on each ray in the range of [t_near, t_far].
 
     Parameters:
-        ray_origins: (num_rays, 3) array of ray origins
-        ray_directions: (num_rays, 3) array of ray directions
+        ray_origins: array of ray origins
+        ray_directions: array of ray directions
         t_near: float, minimum distance for stratified sampling
         t_far: float, maximum distance for stratified sampling
         n_samples: number of samples to draw for each ray
         rng_key: PRNG key
 
     Returns:
-        points: (num_rays, num_samples, 3) array of sampled points coordinates
-        t_i: (num_rays, num_samples) array of sampled t values
+        points: array of sampled points coordinates
+        t_i: array of sampled t values
     """
     # stratified random sampling of t in [t_near, t_far], we start with uniform
     # sampling in [t_near, t_far] and add some randomness in it.
@@ -39,7 +44,13 @@ def stratified_random(ray_origins, ray_directions, t_near, t_far, n_samples, rng
     return points, t_i
 
 
-def importance_sampling(ray_origins, ray_directions, t_values, weights, n_samples, rng_key, combine=True):
+def importance_sampling(ray_origins: Float[Array, "num_rays 3"],
+                        ray_directions: Float[Array, "num_rays 3"],
+                        t_values: Float[Array, "num_rays num_t_values"],
+                        weights: Float[Array, "num_rays num_t_values"],
+                        n_samples, rng_key, combine=True) -> \
+        (Float[Array, "num_rays num_samples 3"],
+         Float[Array, "num_rays num_samples"]):
     """
     Importance sampling for rays.
 
@@ -49,21 +60,21 @@ def importance_sampling(ray_origins, ray_directions, t_values, weights, n_sample
     Note that is function does not sample areas for t < t_values[0] and t >= t_values[-1].
 
     Parameters:
-        ray_origins: (num_rays, 3) array of origins
-        ray_directions: (num_rays, 3) array of ray directions
-        t_values: (num rays, num t values) locations on the rays where importance is given, assume sorted
-        weights: (num rays, num t values) array of relative importance
+        ray_origins: array of origins
+        ray_directions: array of ray directions
+        t_values: locations on the rays where importance is given, assume sorted
+        weights: array of relative importance
         n_samples: number of samples to draw for each ray
         rng_key: PRNG key
         combine: whether to combine new samples with t_values
 
     Returns:
-        points: (num_rays, num_samples, 3) array of sampled points coordinates
-        t_i: (num_rays, num_samples) array of sampled t values
+        points: array of sampled points coordinates
+        t_i: array of sampled t values
     """
 
     @jax.vmap
-    def per_ray_op(r_o, r_d, ts, ws, rng):
+    def for_each_ray(r_o, r_d, ts, ws, rng):
         """
         Per-ray operations to be applied to each ray, we then vmap this operation the ray bundle.
         """
@@ -101,5 +112,5 @@ def importance_sampling(ray_origins, ray_directions, t_values, weights, n_sample
         points = r_o[jnp.newaxis, :] + r_d[jnp.newaxis] * t_i[:, jnp.newaxis]
         return points, t_i
 
-    return per_ray_op(ray_origins, ray_directions, t_values, weights,
-                      jax.random.split(rng_key, ray_origins.shape[0]))
+    return for_each_ray(ray_origins, ray_directions, t_values, weights,
+                        jax.random.split(rng_key, ray_origins.shape[0]))

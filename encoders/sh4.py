@@ -1,18 +1,18 @@
 import flax.linen as nn
 import jax.numpy as jnp
-from jax.typing import ArrayLike
+from jaxtyping import Array, Float
 
 
 class SphericalHarmonic4thEncoder(nn.Module):
     r"""Fourth order spherical harmonic encoding for view directions"""
 
     @nn.compact
-    def __call__(self, dirs: ArrayLike) -> ArrayLike:
+    def __call__(self, dirs: Float[Array, "num_rays 3"]) -> Float[Array, "num_rays 16"]:
         """
         Args:
-            dirs: (num_rays, 3) normalized direction vectors for rays
+            dirs: normalized directional vectors for rays
         Returns:
-            encoding: (num_rays, 16) encoded ray direction vectors
+            encoding: encoded ray directional vectors
         """
         x, y, z = dirs[..., 0], dirs[..., 1], dirs[..., 2]
         xy, xz, yz = x * y, x * z, y * z
