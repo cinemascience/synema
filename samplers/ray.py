@@ -34,14 +34,6 @@ class RaySampler:
 
 
 @dataclass
-class Uniform(RaySampler):
-    # FIXME: can't not train, not working properly or just a bad idea?
-    def generate_samples(self, ray_bundle: RayBundle) -> Float[Array, "num_rays num_samples"]:
-        t_values = jnp.linspace(ray_bundle.t_nears, ray_bundle.t_fars, self.n_samples, axis=-1)
-        return jnp.broadcast_to(t_values, (ray_bundle.origins.shape[0], self.n_samples))
-
-
-@dataclass
 class StratifiedRandom(RaySampler):
     def generate_samples(self, ray_bundle: RayBundle, rng: jax.random.PRNGKey) -> Float[Array, "num_rays num_samples"]:
         # stratified random sampling of t in [t_near, t_far], we start with uniform

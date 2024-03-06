@@ -56,7 +56,7 @@ class VolumeRenderer:
     @staticmethod
     def sample_rays(ray_sampler, field_fn: Callable, ray_bundle: RayBundle, rng: jax.random.PRNGKey,
                     *args, **kwargs):
-        ray_samples = ray_sampler(ray_bundle, rng=rng, *args, **kwargs)
+        ray_samples = ray_sampler(ray_bundle, rng, *args, **kwargs)
 
         viewdirs = ray_bundle.directions / jnp.linalg.norm(ray_bundle.directions)
 
@@ -114,7 +114,7 @@ class Hierarchical(VolumeRenderer):
         # Sample and render the fine model
         rng_key, _ = jax.random.split(rng_key)
         colors, weights, t_values = self.sample_rays(self.fine_sampler, fine_field, ray_bundle,
-                                                     rng=rng_key, t_values=t_values, weights=weights)
+                                                     rng_key, t_values=t_values, weights=weights)
 
         return self.accumulate_samples(colors, weights, t_values)
 
