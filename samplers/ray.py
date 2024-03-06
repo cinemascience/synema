@@ -1,116 +1,152 @@
+from abc import abstractmethod
+from dataclasses import dataclass
+
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
+from renderers.rays import RayBundle, RaySamples
 
-def stratified_random(ray_origins: Float[Array, "num_rays 3"],
-                      ray_directions: Float[Array, "num_rays 3"],
-                      t_near, t_far, n_samples, rng_key) -> \
-        (Float[Array, "num_rays num_samples_per_ray 3"],
-         Float[Array, "num_rays num_samples_per_ray"]):
+
+@dataclass
+class RaySampler:
     """
-    Stratified random sampling on each ray in the range of [t_near, t_far].
-
     Parameters:
-        ray_origins: array of ray origins
-        ray_directions: array of ray directions
-        t_near: float, minimum distance for stratified sampling
-        t_far: float, maximum distance for stratified sampling
-        n_samples: number of samples to draw for each ray
-        rng_key: PRNG key
-
-    Returns:
-        points: array of sampled points coordinates
-        t_i: array of sampled t values
+        n_samples: Number of samples per ray to sample
+    Returns
+        ray_samples: sampled points and t-values of each ray
     """
-    # stratified random sampling of t in [t_near, t_far], we start with uniform
-    # sampling in [t_near, t_far] and add some randomness in it.
-    t_i = jnp.linspace(t_near, t_far, n_samples, axis=-1)
-    # for each ray, we need to generate n_sample of random numbers, totally
-    # N_pixels by N_samples of them.
-    noise_shape = ray_origins.shape[:-1] + (n_samples,)
+    n_samples: int
 
-    # FIXME: do we have to do this?
-    # if not jnp.isscalar(t_far):
-    #     t_far = t_far.reshape((-1, 1))
-    # if not jnp.isscalar(t_near):
-    #     t_near = t_near.reshape((-1, 1))
+    @abstractmethod
+    def generate_samples(self, *args, **kwargs) -> Float[Array, "num_rays num_samples"]:
+        """Generate n_samples of t values for each ray"""
 
-    t_i += jax.random.uniform(rng_key, shape=noise_shape) * (t_far - t_near) / n_samples
-    # p = r_o + t * r_d
-    # multiply ray_direction of (num_rays, 3) by t_i of (num_rays, num_samples) -> (num_rays, num_samples, 3)
-    points = ray_origins[..., jnp.newaxis, :] + jnp.einsum('ik,ij->ikj', t_i, ray_directions)
+    def __call__(self, ray_bundle: RayBundle, *args, **kwargs) -> RaySamples:
+        t_values = self.generate_samples(ray_bundle, *args, **kwargs)
 
-    return points, t_i
+        # p = r_o + t * r_d
+        # multiply ray_direction of (num_rays, 3) by t_i of (num_rays, num_samples) -> (num_rays, num_samples, 3)
+        points = (ray_bundle.origins[..., jnp.newaxis, :] +
+                  jnp.einsum('ik,ij->ikj', t_values, ray_bundle.directions))
+
+        return RaySamples(points=points, t_values=t_values)
 
 
-def importance_sampling(ray_origins: Float[Array, "num_rays 3"],
-                        ray_directions: Float[Array, "num_rays 3"],
-                        t_values: Float[Array, "num_rays num_t_values"],
-                        weights: Float[Array, "num_rays num_t_values"],
-                        n_samples, rng_key, combine=True) -> \
-        (Float[Array, "num_rays num_samples 3"],
-         Float[Array, "num_rays num_samples"]):
+@dataclass
+class Uniform(RaySampler):
+    # FIXME: can't not train, not working properly or just a bad idea?
+    def generate_samples(self, ray_bundle: RayBundle) -> Float[Array, "num_rays num_samples"]:
+        t_values = jnp.linspace(ray_bundle.t_nears, ray_bundle.t_fars, self.n_samples, axis=-1)
+        return jnp.broadcast_to(t_values, (ray_bundle.origins.shape[0], self.n_samples))
+
+
+@dataclass
+class StratifiedRandom(RaySampler):
+    def generate_samples(self, ray_bundle: RayBundle, rng: jax.random.PRNGKey) -> Float[Array, "num_rays num_samples"]:
+        # stratified random sampling of t in [t_near, t_far], we start with uniform
+        # sampling in [t_near, t_far] and add some randomness in it.
+        t_values = jnp.linspace(ray_bundle.t_nears, ray_bundle.t_fars, self.n_samples, axis=-1)
+
+        # for each ray, we need to generate n_sample of random numbers, totally
+        # N_pixels by N_samples of them.
+        noise_shape = ray_bundle.origins.shape[:-1] + (self.n_samples,)
+
+        # FIXME: do we have to do this?
+        # if not jnp.isscalar(t_far):
+        #     t_far = t_far.reshape((-1, 1))
+        # if not jnp.isscalar(t_near):
+        #     t_near = t_near.reshape((-1, 1))
+
+        t_values += jax.random.uniform(rng, shape=noise_shape) * (
+                ray_bundle.t_fars - ray_bundle.t_nears) / self.n_samples
+        return t_values
+
+
+@dataclass
+class Importance(RaySampler):
     """
     Importance sampling for rays.
-
-    Given (sorted) sample points `t_values` on the ray and their relative importance
-     `weights`, sample more points in between in proportional to the weights.
-
-    Note that is function does not sample areas for t < t_values[0] and t >= t_values[-1].
-
+        Given (sorted) sample points `t_values` on the ray and their relative importance `weights`,
+        sample more points in between in proportional to the weights.
     Parameters:
-        ray_origins: array of origins
-        ray_directions: array of ray directions
-        t_values: locations on the rays where importance is given, assume sorted
-        weights: array of relative importance
-        n_samples: number of samples to draw for each ray
-        rng_key: PRNG key
         combine: whether to combine new samples with t_values
-
-    Returns:
-        points: array of sampled points coordinates
-        t_i: array of sampled t values
     """
+    combine: bool = True
 
-    @jax.vmap
-    def for_each_ray(r_o, r_d, ts, ws, rng):
+    def generate_samples(self, ray_bundle: RayBundle,
+                         t_values: Float[Array, "num_rays num_t_values"],
+                         weights: Float[Array, "num_rays num_t_values"],
+                         rng: jax.random.PRNGKey) -> Float[Array, "num_rays num_samples"]:
         """
-        Per-ray operations to be applied to each ray, we then vmap this operation the ray bundle.
+        Sample more t values. Note that is function does not sample areas for t < t_values[0]
+        and t >= t_values[-1].
+
+        Parameters:
+            ray_bundle: array of origins and directions
+            t_values: locations on the rays where importance is given, assume sorted
+            weights: array of relative importance
+            rng: PRNG key
+        Returns:
+            points: array of sampled points coordinates
+            t_i: array of sampled t values
         """
-        # Making sure the sum of weights is not too close to zero (happens when there is
-        # nothing in the scene), to prevent NaN when normalizing cfd.
-        ws += 1e-5
-        cdf = jnp.cumsum(ws, axis=-1)
-        cdf = cdf / cdf[-1]
 
-        # Uniformly sample the range of cdf. Note that it does not start with 0.
-        u_i = jax.random.uniform(rng,
-                                 minval=cdf[0],
-                                 maxval=cdf[-1],
-                                 shape=(n_samples,))
+        @jax.vmap
+        def for_each_ray(ts, ws, rng):
+            """
+            Per-ray operations to be applied to each ray, we then vmap this operation the ray bundle.
+            """
+            # Making sure the sum of weights is not too close to zero (happens when there is
+            # nothing in the scene), to prevent NaN when normalizing cfd.
+            ws += 1e-5
+            cdf = jnp.cumsum(ws, axis=-1)
+            cdf = cdf / cdf[-1]
 
-        # Search for the *bins* where the samples are.
-        indices = jnp.searchsorted(cdf, u_i, side='right')
+            # Uniformly sample the range of cdf. Note that it does not start with 0.
+            u_i = jax.random.uniform(rng,
+                                     minval=cdf[0],
+                                     maxval=cdf[-1],
+                                     shape=(self.n_samples,))
 
-        # Calculate the linear interpolation ratio for the samples.
-        # Here ws is actually delta_cdf
-        r_i = (u_i - cdf[indices]) / ws[indices]
+            # Search for the *bins* where the samples are.
+            indices = jnp.searchsorted(cdf, u_i, side='right')
 
-        # Linear interpolate for samples on t axis.
-        delta_t = jnp.diff(ts)
-        t_i = r_i * delta_t[indices] + ts[indices]
+            # Calculate the linear interpolation ratio for the samples.
+            # Here ws is actually delta_cdf
+            r_i = (u_i - cdf[indices]) / ws[indices]
 
-        t_i = jax.lax.stop_gradient(t_i)
+            # Linear interpolate for samples on t axis.
+            delta_t = jnp.diff(ts)
+            t_i = r_i * delta_t[indices] + ts[indices]
 
-        if combine:
-            t_i = jnp.concatenate((t_i, ts))
+            t_i = jax.lax.stop_gradient(t_i)
 
-        # Sort samples in t to facilitate volume rendering.
-        t_i = jnp.sort(t_i)
+            if self.combine:
+                t_i = jnp.concatenate((t_i, ts))
 
-        points = r_o[jnp.newaxis, :] + r_d[jnp.newaxis] * t_i[:, jnp.newaxis]
-        return points, t_i
+            # Sort samples in t to facilitate volume rendering.
+            t_i = jnp.sort(t_i)
 
-    return for_each_ray(ray_origins, ray_directions, t_values, weights,
-                        jax.random.split(rng_key, ray_origins.shape[0]))
+            return t_i
+
+        return for_each_ray(t_values, weights,
+                            jax.random.split(rng, ray_bundle.origins.shape[0]))
+
+
+@dataclass
+class DepthGuided(RaySampler):
+    """Depth guided sampling of rays. Use given ground truth depth value to sample rays.
+    """
+    sigma: float = 1.0
+
+    def generate_samples(self,
+                         ray_bundle: RayBundle,
+                         depth_gt: Float[Array, "num_ray"],
+                         rng_key) -> Float[Array, "num_rays num_samples"]:
+        """Sample around the ground truth depth value.
+        """
+        u = jax.random.normal(rng_key, shape=(depth_gt.shape[0], self.n_samples)) * self.sigma
+        t_values = depth_gt + u
+        t_values = jnp.sort(t_values, axis=-1)
+        return t_values

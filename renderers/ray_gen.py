@@ -1,5 +1,48 @@
+from abc import abstractmethod
+from dataclasses import dataclass
+
 import jax.numpy as jnp
 from jaxtyping import Array, Float
+
+from renderers.rays import RayBundle
+
+
+@dataclass
+class RayGenerator:
+    # TODO: these are actually Camera properties
+    width: int
+    height: int
+    focal: float
+
+    @abstractmethod
+    def generate(self, *args, **kwargs) -> RayBundle:
+        """Generate a ray bundle."""
+
+    def __call__(self, *args, **kwargs) -> RayBundle:
+        return self.generate(*args, **kwargs)
+
+
+@dataclass
+class Perspective(RayGenerator):
+    def generate(self,
+                 pixel_coordinates: Float[Array, "num_of_pixels 2"],
+                 pose: Float[Array, "4 4"],
+                 t_near: float, t_far: float) -> RayBundle:
+        i = pixel_coordinates[..., 1]
+        j = pixel_coordinates[..., 0]
+
+        i = (i - self.width * 0.5) / self.focal
+        j = -(j - self.height * 0.5) / self.focal
+        k = -jnp.ones_like(i)
+
+        dirs = jnp.stack([i, j, k], axis=-1)
+        ray_dirs = jnp.einsum('ij,kj->ik', dirs, pose[:3, :3])
+
+        # TODO: do we want to normalize ray_dirs or not?
+        ray_origins = jnp.broadcast_to(pose[:3, -1], jnp.shape(ray_dirs))
+
+        return RayBundle(origins=ray_origins, directions=ray_dirs,
+                         t_nears=t_near, t_fars=t_far)
 
 
 # Note: camera.focal_point = camera.position + camera.distance * camera.direction
@@ -36,25 +79,4 @@ def generate_perspective_rays(pixel_coordinates, width, height, fov_deg, focal, 
     # broadcast it to a matrix with the shape of ray_dirs.
     ray_origins = jnp.broadcast_to(pose[:3, -1], jnp.shape(ray_dirs))
 
-    return ray_origins, ray_dirs
-
-
-def generate_rays(pixel_coordinates: Float[Array, "num_of_pixels 2"],
-                  width: int,
-                  height: int,
-                  focal: float,
-                  pose: Float[Array, "4 4"]) -> \
-        (Float[Array, "num_of_pixels 3"], Float[Array, "num_of_pixels 3"]):
-    i = pixel_coordinates[..., 1]
-    j = pixel_coordinates[..., 0]
-
-    i = (i - width * 0.5) / focal
-    j = -(j - height * 0.5) / focal
-    k = -jnp.ones_like(i)
-
-    dirs = jnp.stack([i, j, k], axis=-1)
-    ray_dirs = jnp.einsum('ij,kj->ik', dirs, pose[:3, :3])
-
-    # TODO: do we ant to normalize ray_dirs or not?
-    ray_origins = jnp.broadcast_to(pose[:3, -1], jnp.shape(ray_dirs))
     return ray_origins, ray_dirs

@@ -12,14 +12,14 @@ class PixelSampler:
     height: int
 
     @abstractmethod
-    def generate_pixel_samples(self, *args, **kwargs) -> Float[Array, "n_samples 2"]:
+    def generate_samples(self, *args, **kwargs) -> Float[Array, "n_samples 2"]:
         """Generates pixel samples
         Returns
             (row, col) array of pixel coordinates
         """
 
     def __call__(self, *args, **kwargs):
-        return self.generate_pixel_samples(*args, **kwargs)
+        return self.generate_samples(*args, **kwargs)
 
 
 @dataclass
@@ -30,7 +30,7 @@ class Dense(PixelSampler):
       [height*width, 2] of (row, col) coordinates.
     """
 
-    def generate_pixel_samples(self):
+    def generate_samples(self):
         col, row = jnp.meshgrid(jnp.arange(self.width, dtype=jnp.float32),
                                 jnp.arange(self.height, dtype=jnp.float32))
 
@@ -46,7 +46,7 @@ class UniformRandom(PixelSampler):
     """
     n_samples: int
 
-    def generate_pixel_samples(self, rng: jax.random.PRNGKey):
+    def generate_samples(self, rng: jax.random.PRNGKey):
         return jax.random.choice(rng, Dense(self.width, self.height)(), shape=(self.n_samples,))
 
 
@@ -60,10 +60,10 @@ class MaskedUniformRandom(PixelSampler):
      :return: (N_samples, 2) of (row, col) coordinates
      """
 
-    def generate_pixel_samples(self,
-                               mask: Bool[Array, "n_rows n_cols"],
-                               n_samples: int,
-                               rng: jax.random.PRNGKey):
+    def generate_samples(self,
+                         mask: Bool[Array, "n_rows n_cols"],
+                         n_samples: int,
+                         rng: jax.random.PRNGKey):
         assert (self.height, self.width) == mask.shape
 
         pixels = Dense(width=self.width, height=self.height)()

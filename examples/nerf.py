@@ -6,12 +6,13 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 
 from models.nerfs import NeRFModel
-from renderers.ray_gen import generate_rays
+from renderers.ray_gen import Perspective
+from renderers.rays import RayBundle
 from renderers.volume import volume_rendering_hierarchical
 from samplers.pixel import Dense, UniformRandom
 
 
-def create_train_step(key, model_coarse, model_fine, optimizer, t_near, t_far):
+def create_train_step(key, model_coarse, model_fine, optimizer):
     rng_coarse, rng_fine = jax.random.split(key, 2)
     init_states = TrainState.create(apply_fn=None,
                                     params={'params_coarse': (model_coarse.init(rng_coarse,
@@ -22,12 +23,11 @@ def create_train_step(key, model_coarse, model_fine, optimizer, t_near, t_far):
                                                                             jnp.empty((1024, 3))))},
                                     tx=optimizer)
 
-    def loss_fn(params, inputs, target, key):
-        ray_o, ray_d = inputs
+    def loss_fn(params, ray_bundle: RayBundle, target, key):
         rgb, depth = volume_rendering_hierarchical(model_coarse.bind(params['params_coarse']),
                                                    model_fine.bind(params['params_fine']),
-                                                   ray_o, ray_d, key,
-                                                   t_near=t_near, t_far=t_far)
+                                                   ray_bundle,
+                                                   key)
         return jnp.mean(optax.l2_loss(rgb, target.reshape(-1, 3)))
 
     @jax.jit
@@ -62,13 +62,14 @@ if __name__ == '__main__':
     optimizer = optax.adam(learning_rate=schedule_fn)
 
     train_step, states = create_train_step(key, model_coarse, model_fine,
-                                           optimizer, t_near, t_far)
+                                           optimizer)
 
     pbar = tqdm(range(5000))
 
     pixel_sampler = UniformRandom(width=width,
                                   height=height,
                                   n_samples=1024)
+    ray_generator = Perspective(width=width, height=height, focal=focal)
 
     for i in pbar:
         key, subkey = jax.random.split(key)
@@ -80,32 +81,24 @@ if __name__ == '__main__':
         key, subkey = jax.random.split(key)
         pixel_coordinates = pixel_sampler(rng=subkey)
 
-        ray_origins, ray_directions = generate_rays(pixel_coordinates,
-                                                    width=width,
-                                                    height=height,
-                                                    focal=focal,
-                                                    pose=pose)
+        ray_bundle = ray_generator(pixel_coordinates, pose, t_near, t_far)
+
         target = image[pixel_coordinates[:, 0].astype(int), pixel_coordinates[:, 1].astype(int), :3]
 
         key, subkey = jax.random.split(key)
-        states, loss = train_step(states, (ray_origins, ray_directions), target, subkey)
+        states, loss = train_step(states, ray_bundle, target, subkey)
         pbar.set_description("Loss %f" % loss)
 
         if i % 100 == 0:
             pixel_coordinates = Dense(width=width, height=height)()
 
-            ray_origins, ray_directions = generate_rays(pixel_coordinates,
-                                                        width=width,
-                                                        height=height,
-                                                        focal=focal,
-                                                        pose=poses[15])
+            ray_bundle = ray_generator(pixel_coordinates, poses[-1], t_near, t_far)
 
             key, _ = jax.random.split(key)
             image_recon, depth_recon = volume_rendering_hierarchical(model_coarse.bind(states.params['params_coarse']),
                                                                      model_fine.bind(states.params['params_fine']),
-                                                                     ray_origins,
-                                                                     ray_directions, key,
-                                                                     t_near, t_far)
+                                                                     ray_bundle,
+                                                                     key)
             plt.imshow(image_recon.reshape((100, 100, 3)))
             plt.savefig(str(i).zfill(6) + "png")
             plt.close()
