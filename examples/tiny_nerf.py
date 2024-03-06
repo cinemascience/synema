@@ -8,7 +8,7 @@ from tqdm import tqdm
 from models.nerfs import TinyNeRFModel
 from renderers.ray_gen import Perspective
 from renderers.rays import RayBundle
-from renderers.volume import volume_rendering
+from renderers.volume import Simple
 from samplers.pixel import Dense
 
 
@@ -16,11 +16,12 @@ def create_train_step(key, model, optimizer):
     init_state = TrainState.create(apply_fn=model.apply,
                                    params=model.init(key, jnp.empty((1024, 3)), jnp.empty((1024, 3))),
                                    tx=optimizer)
+    renderer = Simple()
 
     def loss_fn(params, ray_bundle: RayBundle, target, key: jax.random.PRNGKey):
-        rgb, depth, _ = volume_rendering(model.bind(params),
-                                         ray_bundle,
-                                         key)
+        rgb, depth, _ = renderer(model.bind(params),
+                                 ray_bundle,
+                                 key)
         return jnp.mean(optax.l2_loss(rgb, target.reshape(-1, 3)))
 
     @jax.jit
@@ -68,6 +69,7 @@ if __name__ == "__main__":
     pixel_sampler = Dense(width=width, height=height)
     pixel_coordinates = pixel_sampler()
     ray_generator = Perspective(width=width, height=height, focal=focal)
+    renderer = Simple()
 
     for i in pbar:
         key, subkey = jax.random.split(key)
@@ -90,9 +92,9 @@ if __name__ == "__main__":
             ray_bundle = ray_generator(pixel_coordinates, poses[-1], t_near, t_far)
 
             key, _ = jax.random.split(key)
-            image_recon, depth_recon, weight_recon = volume_rendering(model.bind(state.params),
-                                                                      ray_bundle,
-                                                                      key)
+            image_recon, depth_recon, weight_recon = renderer(model.bind(state.params),
+                                                              ray_bundle,
+                                                              key)
 
             plt.imshow(image_recon.reshape((100, 100, 3)))
             plt.savefig(str(i).zfill(6) + "rgb")

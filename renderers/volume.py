@@ -1,8 +1,5 @@
-# TODO: I am thinking about the depth MLP at this time. We probably will end up with
-#  two MLP, one for scalar/RGBA and other other for Z
-# TODO: This should eventually provide different classes of volume renderer, each for
-#  one kind of network model (two MLP outputs rgb and sigma, v.s. one MLP outputs
-#  rgb, sigma).
+from abc import abstractmethod
+from dataclasses import dataclass
 from typing import Callable
 
 import jax.numpy as jnp
@@ -13,103 +10,113 @@ from renderers.rays import RayBundle
 from samplers.ray import StratifiedRandom, Importance
 
 
-def sample_radiance_field(field_fn: Callable,
-                          points: Float[Array, "num_rays num_samples_per_ray 3"],
-                          viewdirs: Float[Array, "num_rays 3"] = None) -> \
-        (Float[Array, "num_rays num_samples_per_ray 3"],
-         Float[Array, "num_rays num_samples_per_ray"]):
-    """Sample radiance field
-    Parameters:
-        field_fn: field function mapping from position and view direction to color and density
-        points: points on rays to sample the field
-        viewdirs: normalized directional vector of rays
-    Return:
-        (colors, density) color and opacity predicted by the field function.
-    """
+@dataclass
+class VolumeRenderer:
+    @staticmethod
+    def sample_radiance_field(field_fn: Callable,
+                              points: Float[Array, "num_rays num_samples_per_ray 3"],
+                              viewdirs: Float[Array, "num_rays 3"] = None) -> \
+            (Float[Array, "num_rays num_samples_per_ray 3"], Float[Array, "num_rays num_samples_per_ray"]):
+        """Sample radiance field
+        Parameters:
+            field_fn: field function mapping from position and view direction to color and density
+            points: points on rays to sample the field
+            viewdirs: normalized directional vector of rays
+        Return:
+            (colors, density) color and opacity predicted by the field function.
+        """
 
-    # vmap vectorize along the num_rays dimension, we also add another dimension for num_samples
-    # for viewdirs.
-    return jax.vmap(field_fn)(points, jnp.broadcast_to(viewdirs[:, None, :], points.shape))
+        # vmap vectorize along the num_rays dimension, we also add another dimension for num_samples
+        # for viewdirs.
+        return jax.vmap(field_fn)(points, jnp.broadcast_to(viewdirs[:, None, :], points.shape))
+
+    # Compute the accumulated transmittance T_i = exp(-sum(sigma_i delta_i))
+    # where delta_i = t_{i+1} - t_i for i = [0, N-1].
+    @staticmethod
+    def accumulated_transmittance(opacities: Float[Array, "num_pixels num_sample_per_ray"],
+                                  t_vals: Float[Array, "num_pixels num_sample_per_ray"]) -> \
+            Float[Array, "num_pixels num_sample_per_ray"]:
+        delta_t = jnp.diff(t_vals)
+        # add one extra (huge) delta_N = t_{N+1} - t_N that does not
+        # exist to work with the shape of sampled opacities (but
+        # provide negligible contribution).
+        delta_t = jnp.concatenate([delta_t,
+                                   jnp.broadcast_to(1e10, delta_t[..., :1].shape)],
+                                  axis=-1)
+        # TODO: some implementation multiplies delta_t with the L2 norm of ray direction.
+        alphas = 1. - jnp.exp(-opacities * delta_t)
+        # TODO: we probably don't need this clipping. exp(-x) for x >= 0 will be in [1, 0]
+        clipped_densities = jnp.clip(1.0 - alphas, 1.0e-10, 1.0)
+        # jnp.cumprod is inclusive scan, we need to add the first 1s ourselves.
+        transmittance = jnp.cumprod(jnp.concatenate([jnp.ones_like(clipped_densities[..., :1]),
+                                                     clipped_densities[..., :-1]], axis=-1),
+                                    axis=-1)
+        return alphas * transmittance
+
+    @staticmethod
+    def sample_rays(ray_sampler, field_fn: Callable, ray_bundle: RayBundle, rng: jax.random.PRNGKey,
+                    *args, **kwargs):
+        ray_samples = ray_sampler(ray_bundle, rng=rng, *args, **kwargs)
+
+        viewdirs = ray_bundle.directions / jnp.linalg.norm(ray_bundle.directions)
+
+        colors, opacities = VolumeRenderer.sample_radiance_field(field_fn, ray_samples.points, viewdirs)
+        weights = VolumeRenderer.accumulated_transmittance(opacities, ray_samples.t_values)
+        return colors, weights, ray_samples.t_values
+
+    @staticmethod
+    def accumulate_samples(colors, weights, t_values):
+        # Einstein's notation to compute weighted ave0rage of colors, i.e., sum(weights * colors)
+        # reducing (num_rays, num_samples) x (num_rays, num_samples, rgb) -> (num_rays, rgb)
+        rgb = jnp.einsum('ij,ijk->ik', weights, colors)
+        # Similar to the above, but reducing (num_rays, num_samples) x (num_rays, num_samples) -> (num_rays)
+        depth = jnp.einsum('ij,ij->i', weights, t_values)
+
+        # FIXME: Is this the right way to calculate depth?
+        # depth = -depth * jnp.linalg.norm(ray_directions, axis=-1)
+        return rgb, depth, weights
+
+    @abstractmethod
+    def render(self, *args, **kwargs) -> \
+            (Float[Array, "num_rays 3"], Float[Array, "num_rays"], Float[Array, "num_rays num_sample_per_ray"]):
+        """Render the field"""
+
+    def __call__(self, *args, **kwargs):
+        return self.render(*args, **kwargs)
 
 
-# Compute the accumulated transmittance T_i = exp(-sum(sigma_i delta_i))
-# where delta_i = t_{i+1} - t_i for i = [0, N-1].
-def accumulated_transmittance(opacities: Float[Array, "num_pixels num_sample_per_ray"],
-                              t_vals: Float[Array, "num_pixels num_sample_per_ray"]) -> \
-        Float[Array, "num_pixels num_sample_per_ray"]:
-    delta_t = jnp.diff(t_vals)
-    # add one extra (huge) delta_N = t_{N+1} - t_N that does not
-    # exist to work with the shape of sampled opacities (but
-    # provide negligible contribution).
-    delta_t = jnp.concatenate([delta_t,
-                               jnp.broadcast_to(1e10, delta_t[..., :1].shape)],
-                              axis=-1)
-    # TODO: some implementation multiplies delta_t with the L2 norm of ray direction.
-    alphas = 1. - jnp.exp(-opacities * delta_t)
-    # TODO: we probably don't need this clipping. exp(-x) for x >= 0 will be in [1, 0]
-    clipped_densities = jnp.clip(1.0 - alphas, 1.0e-10, 1.0)
-    # jnp.cumprod is inclusive scan, we need to add the first 1s ourselves.
-    transmittance = jnp.cumprod(jnp.concatenate([jnp.ones_like(clipped_densities[..., :1]),
-                                                 clipped_densities[..., :-1]], axis=-1),
-                                axis=-1)
-    return alphas * transmittance
+@dataclass
+class Simple(VolumeRenderer):
+    # TODO: why type annotation doesn't work here?
+    ray_sampler = StratifiedRandom(n_samples=32)
+
+    def render(self,
+               field_fn: Callable,
+               ray_bundle: RayBundle,
+               rng_key: jax.random.PRNGKey):
+        colors, weights, t_values = self.sample_rays(self.ray_sampler, field_fn, ray_bundle, rng_key)
+        return self.accumulate_samples(colors, weights, t_values)
 
 
-def volume_rendering(field_fn: Callable,
-                     ray_bundle: RayBundle,
-                     rng_key: jax.random.PRNGKey) -> \
-        (Float[Array, "num_rays 3"], Float[Array, "num_rays"], Float[Array, "num_rays num_sample_per_ray"]):
-    sampler = StratifiedRandom(n_samples=32)
-    ray_samples = sampler(ray_bundle, rng=rng_key)
-
-    viewdirs = ray_bundle.directions / jnp.linalg.norm(ray_bundle.directions)
-
-    colors, opacities = sample_radiance_field(field_fn, ray_samples.points, viewdirs)
-    weights = accumulated_transmittance(opacities, ray_samples.t_values)
-
-    # Einstein's notation to compute weighted ave0rage of colors, i.e., sum(weights * colors)
-    # reducing (num_rays, num_samples) x (num_rays, num_samples, rgb) -> (num_rays, rgb)
-    rgb = jnp.einsum('ij,ijk->ik', weights, colors)
-    # Similar to the above, but reducing (num_rays, num_samples) x (num_rays, num_samples) -> (num_rays)
-    depth = jnp.einsum('ij,ij->i', weights, ray_samples.t_values)
-
-    # FIXME: Is this the right way to calculate depth?
-    # depth = -depth * jnp.linalg.norm(ray_directions, axis=-1)
-    return rgb, depth, weights
-
-
-def volume_rendering_hierarchical(coarse_field: Callable,
-                                  fine_field: Callable,
-                                  ray_bundle: RayBundle,
-                                  rng_key) -> \
-        (Float[Array, "num_rays 3"], Float[Array, "num_rays"]):
-    viewdirs = ray_bundle.directions / jnp.linalg.norm(ray_bundle.directions)
-
-    # Sample and render with the coarse model
-    coarse_sampler = StratifiedRandom(n_samples=32)
-    ray_samples = coarse_sampler(ray_bundle, rng=rng_key)
-
-    colors, opacities = sample_radiance_field(coarse_field, ray_samples.points, viewdirs)
-    weights = accumulated_transmittance(opacities, ray_samples.t_values)
-
-    # sample and render the fine model
-    rng_key, _ = jax.random.split(rng_key)
-
+@dataclass
+class Hierarchical(VolumeRenderer):
+    coarse_sampler = StratifiedRandom(n_samples=64)
     fine_sampler = Importance(n_samples=128)
-    ray_samples = fine_sampler(ray_bundle, ray_samples.t_values, weights, rng_key)
 
-    colors, opacities = sample_radiance_field(fine_field, ray_samples.points, viewdirs)
-    weights = accumulated_transmittance(opacities, ray_samples.t_values)
+    def render(self,
+               coarse_field: Callable,
+               fine_field: Callable,
+               ray_bundle: RayBundle,
+               rng_key: jax.random.PRNGKey):
+        # Sample and render with the coarse model
+        _, weights, t_values = self.sample_rays(self.coarse_sampler, coarse_field, ray_bundle, rng_key)
 
-    # Einstein's notation to compute weighted average of colors, i.e., sum(weights * colors)
-    # reducing (num_rays, num_samples) x (num_rays, num_samples, rgb) -> (num_rays, rgb)
-    rgb = jnp.einsum('ij,ijk->ik', weights, colors)
-    # Similar to the above, but reducing (num_rays, num_samples) x (num_rays, num_samples) -> (num_rays)
-    depth = jnp.einsum('ij,ij->i', weights, ray_samples.t_values)
+        # Sample and render the fine model
+        rng_key, _ = jax.random.split(rng_key)
+        colors, weights, t_values = self.sample_rays(self.fine_sampler, fine_field, ray_bundle,
+                                                     rng=rng_key, t_values=t_values, weights=weights)
 
-    # FIXME: Is this the right way to calculate depth?
-    # depth = -depth * jnp.linalg.norm(ray_directions, axis=-1)
-    return rgb, depth
+        return self.accumulate_samples(colors, weights, t_values)
 
 # TODO: unfinished ideas, separate functions or just a single function would work?
 # def sample_rgb_field(field_fn, points):

@@ -74,10 +74,11 @@ class Importance(RaySampler):
     """
     combine: bool = True
 
-    def generate_samples(self, ray_bundle: RayBundle,
+    def generate_samples(self,
+                         ray_bundle: RayBundle,
+                         rng: jax.random.PRNGKey,
                          t_values: Float[Array, "num_rays num_t_values"],
-                         weights: Float[Array, "num_rays num_t_values"],
-                         rng: jax.random.PRNGKey) -> Float[Array, "num_rays num_samples"]:
+                         weights: Float[Array, "num_rays num_t_values"]) -> Float[Array, "num_rays num_samples"]:
         """
         Sample more t values. Note that is function does not sample areas for t < t_values[0]
         and t >= t_values[-1].
@@ -142,8 +143,8 @@ class DepthGuided(RaySampler):
 
     def generate_samples(self,
                          ray_bundle: RayBundle,
-                         depth_gt: Float[Array, "num_ray"],
-                         rng_key) -> Float[Array, "num_rays num_samples"]:
+                         rng_key: jax.random.PRNGKey,
+                         depth_gt: Float[Array, "num_ray"]) -> Float[Array, "num_rays num_samples"]:
         """Sample around the ground truth depth value.
         """
         u = jax.random.normal(rng_key, shape=(depth_gt.shape[0], self.n_samples)) * self.sigma

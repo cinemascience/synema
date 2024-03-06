@@ -8,7 +8,7 @@ from tqdm import tqdm
 from models.nerfs import NeRFModel
 from renderers.ray_gen import Perspective
 from renderers.rays import RayBundle
-from renderers.volume import volume_rendering_hierarchical
+from renderers.volume import Hierarchical
 from samplers.pixel import Dense, UniformRandom
 
 
@@ -23,11 +23,13 @@ def create_train_step(key, model_coarse, model_fine, optimizer):
                                                                             jnp.empty((1024, 3))))},
                                     tx=optimizer)
 
+    renderer = Hierarchical()
+
     def loss_fn(params, ray_bundle: RayBundle, target, key):
-        rgb, depth = volume_rendering_hierarchical(model_coarse.bind(params['params_coarse']),
-                                                   model_fine.bind(params['params_fine']),
-                                                   ray_bundle,
-                                                   key)
+        rgb, depth, _ = renderer(model_coarse.bind(params['params_coarse']),
+                                 model_fine.bind(params['params_fine']),
+                                 ray_bundle,
+                                 key)
         return jnp.mean(optax.l2_loss(rgb, target.reshape(-1, 3)))
 
     @jax.jit
@@ -70,6 +72,7 @@ if __name__ == '__main__':
                                   height=height,
                                   n_samples=1024)
     ray_generator = Perspective(width=width, height=height, focal=focal)
+    renderer = Hierarchical()
 
     for i in pbar:
         key, subkey = jax.random.split(key)
@@ -95,10 +98,10 @@ if __name__ == '__main__':
             ray_bundle = ray_generator(pixel_coordinates, poses[-1], t_near, t_far)
 
             key, _ = jax.random.split(key)
-            image_recon, depth_recon = volume_rendering_hierarchical(model_coarse.bind(states.params['params_coarse']),
-                                                                     model_fine.bind(states.params['params_fine']),
-                                                                     ray_bundle,
-                                                                     key)
+            image_recon, depth_recon, _ = renderer(model_coarse.bind(states.params['params_coarse']),
+                                                   model_fine.bind(states.params['params_fine']),
+                                                   ray_bundle,
+                                                   key)
             plt.imshow(image_recon.reshape((100, 100, 3)))
             plt.savefig(str(i).zfill(6) + "png")
             plt.close()
