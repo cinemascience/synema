@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import jax.random
 from jaxtyping import Array, Float
 
+import samplers.ray
 from renderers.rays import RayBundle
 from samplers.ray import StratifiedRandom, Importance
 
@@ -101,15 +102,20 @@ class Simple(VolumeRenderer):
 @dataclass
 class Hierarchical(VolumeRenderer):
     coarse_sampler = StratifiedRandom(n_samples=64)
-    fine_sampler = Importance(n_samples=128)
+    fine_sampler = Importance(n_samples=64)
 
     def render(self,
                coarse_field: Callable,
                fine_field: Callable,
                ray_bundle: RayBundle,
-               rng_key: jax.random.PRNGKey):
+               rng_key: jax.random.PRNGKey,
+               *args, **kwargs):
         # Sample and render with the coarse model
-        _, weights, t_values = self.sample_rays(self.coarse_sampler, coarse_field, ray_bundle, rng_key)
+        _, weights, t_values = self.sample_rays(self.coarse_sampler,
+                                                coarse_field,
+                                                ray_bundle,
+                                                rng_key,
+                                                *args, **kwargs)
 
         # Sample and render the fine model
         rng_key, _ = jax.random.split(rng_key)
@@ -117,6 +123,23 @@ class Hierarchical(VolumeRenderer):
                                                      rng_key, t_values=t_values, weights=weights)
 
         return self.accumulate_samples(colors, weights, t_values)
+
+
+@dataclass
+class DepthGuided(Hierarchical):
+    """Depth guided renderer insired by https://barbararoessle.github.io/dense_depth_priors_nerf/.
+    Replace the coarse sampler with DepthGuided and use one single
+    """
+    coarse_sampler = samplers.ray.DepthGuided(n_samples=32)
+
+    def render(self,
+               field_fn: Callable,
+               ray_bundle: RayBundle,
+               rng_key: jax.random.PRNGKey,
+               depth_gt: Float[Array, "num_rays num_samples"],
+               *args, **kwargs):
+        return super().render(field_fn, field_fn, ray_bundle, rng_key,
+                              depth_gt, *args, **kwargs)
 
 # TODO: unfinished ideas, separate functions or just a single function would work?
 # def sample_rgb_field(field_fn, points):
