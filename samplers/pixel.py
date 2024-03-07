@@ -59,17 +59,17 @@ class MaskedUniformRandom(PixelSampler):
      :param rng: PRNG key
      :return: (N_samples, 2) of (row, col) coordinates
      """
+    n_samples: int
 
     def generate_samples(self,
                          mask: Bool[Array, "n_rows n_cols"],
-                         n_samples: int,
                          rng: jax.random.PRNGKey):
         assert (self.height, self.width) == mask.shape
 
         pixels = Dense(width=self.width, height=self.height)()
         cdf = jnp.cumsum(mask.reshape(-1, 1))
         indices = jnp.searchsorted(cdf,
-                                   jax.random.randint(rng, shape=(n_samples,),
+                                   jax.random.randint(rng, shape=(self.n_samples,),
                                                       minval=0, maxval=cdf[-1]),
                                    side="right")
         return pixels[indices]
@@ -85,6 +85,6 @@ if __name__ == "__main__":
 
     key, _ = jax.random.split(key)
     mask = jax.random.bernoulli(key, shape=(3, 4))
-    samples = MaskedUniformRandom(width=4, height=3)(mask, 5, key).astype(int)
+    samples = MaskedUniformRandom(width=4, height=3, n_samples=5)(mask, key).astype(int)
     assert samples.shape[0] == 5
     assert mask[samples[:, 0], samples[:, 1]].all()

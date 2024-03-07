@@ -132,24 +132,27 @@ class DepthGuided(RaySampler):
     """Depth-guided sampling of rays inspired by https://barbararoessle.github.io/dense_depth_priors_nerf/.
      Use given ground truth depth value to sample rays.
     """
-    sigma: float = 0.05
+    sigma: float = 0.01
 
     def generate_samples(self,
                          ray_bundle: RayBundle,
                          rng_key: jax.random.PRNGKey,
                          depth_gt: Float[Array, "num_ray"]) -> Float[Array, "num_rays num_samples"]:
-        """Half of the samples are distributed between the near and far planes, the second half
-         draws from a Gaussian distribution centered around the ground truth depth value.
+        """Half of the samples are distributed between the near and far planes,
+        the second half draws from a Gaussian distribution centered around the
+        ground truth depth value.
         """
         # TODO: current version gives large error for BG pixels.
         first, second = jax.random.split(rng_key)
         num_rays = depth_gt.shape[0]
 
-        first_half = jax.random.uniform(first, (num_rays, self.n_samples // 2),
+        first_half = jax.random.uniform(first,
+                                        (num_rays, self.n_samples // 2),
                                         minval=ray_bundle.t_nears,
                                         maxval=ray_bundle.t_fars)
 
-        second_half = jax.random.normal(second, shape=(num_rays, self.n_samples // 2)) * self.sigma
+        second_half = jax.random.normal(second,
+                                        shape=(num_rays, self.n_samples // 2)) * self.sigma
         second_half += depth_gt
 
         t_values = jnp.concatenate([first_half, second_half], axis=-1)

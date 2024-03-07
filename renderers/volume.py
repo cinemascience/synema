@@ -102,7 +102,7 @@ class Simple(VolumeRenderer):
 @dataclass
 class Hierarchical(VolumeRenderer):
     coarse_sampler = StratifiedRandom(n_samples=64)
-    fine_sampler = Importance(n_samples=64)
+    fine_sampler = Importance(n_samples=128)
 
     def render(self,
                coarse_field: Callable,
@@ -127,10 +127,10 @@ class Hierarchical(VolumeRenderer):
 
 @dataclass
 class DepthGuided(Hierarchical):
-    """Depth guided renderer insired by https://barbararoessle.github.io/dense_depth_priors_nerf/.
-    Replace the coarse sampler with DepthGuided and use one single
+    """Depth-guided renderer inspired by https://barbararoessle.github.io/dense_depth_priors_nerf/.
+    Replace the coarse sampler with DepthGuided and use one single field model.
     """
-    coarse_sampler = samplers.ray.DepthGuided(n_samples=32)
+    coarse_sampler = samplers.ray.DepthGuided(n_samples=64)
 
     def render(self,
                field_fn: Callable,
@@ -138,8 +138,45 @@ class DepthGuided(Hierarchical):
                rng_key: jax.random.PRNGKey,
                depth_gt: Float[Array, "num_rays num_samples"],
                *args, **kwargs):
-        return super().render(field_fn, field_fn, ray_bundle, rng_key,
-                              depth_gt, *args, **kwargs)
+        return super().render(field_fn, field_fn,
+                              ray_bundle, rng_key,
+                              depth_gt,
+                              *args, **kwargs)
+
+
+@dataclass
+class DepthGuidedInfer(DepthGuided):
+    # TODO: unfinished.
+    coarse_sampler = StratifiedRandom(n_samples=32)
+    fine_sampler = Importance(n_samples=32, combine=False)
+
+    def render(self,
+               field_fn: Callable,
+               ray_bundle: RayBundle,
+               rng_key: jax.random.PRNGKey,
+               *args, **kwargs):
+        # The first half of the samples are used to render an approximate depth value
+        # t_mean and standard deviation t_std
+        _, _, t_values = self.sample_rays(self.coarse_sampler,
+                                          field_fn,
+                                          ray_bundle,
+                                          rng_key,
+                                          *args, **kwargs)
+        t_mean = jnp.mean(t_values, axis=-1)
+        t_std = jnp.std(t_values, axis=-1)
+
+        # Sample the second half according to N(t_mean, t_std)
+        # We first generate
+        t_values = jnp.linspace(jax.scipy.stats.norm.ppf(0.05),
+                                jax.scipy.stats.norm.ppf(0.95),
+                                self.fine_sampler.n_samples)
+        weights = jax.scipy.stats.norm.pdf(t_values) #, loc=t_mean, scale=t_std)
+
+        rng_key, _ = jax.random.split(rng_key)
+        colors, weights, t_values = self.sample_rays(self.fine_sampler, field_fn, ray_bundle,
+                                                     rng_key, t_values=t_values, weights=weights)
+
+        return self.accumulate_samples(colors, weights, t_values)
 
 # TODO: unfinished ideas, separate functions or just a single function would work?
 # def sample_rgb_field(field_fn, points):
