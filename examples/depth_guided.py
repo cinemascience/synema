@@ -5,10 +5,10 @@ import optax
 from flax.training.train_state import TrainState
 from tqdm import tqdm
 
-from models.nerfs import VeryTinyNeRFModel
+from models.nerfs import TinyNeRFModel, SirenNeRFModel
 from renderers.ray_gen import Perspective
 from renderers.rays import RayBundle
-from renderers.volume import DepthGuided, Hierarchical
+from renderers.volume import DepthGuided, Simple
 from samplers.pixel import Dense, MaskedUniformRandom
 
 
@@ -20,10 +20,10 @@ def create_train_step(key, model, optimizer):
 
     def loss_fn(params, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):
         rgb_target, depth_target = targets
-        rgb, _, _ = train_renderer(field_fn=model.bind(params),
-                                   ray_bundle=ray_bundle,
-                                   rng_key=key,
-                                   depth_gt=depth_target.reshape((-1, 1)))
+        (_, rgb), _, _ = train_renderer(field_fn=model.bind(params),
+                                        ray_bundle=ray_bundle,
+                                        rng_key=key,
+                                        depth_gt=depth_target.reshape((-1, 1)))
         # TODO: add loss on depth?
         return jnp.mean(optax.l2_loss(rgb, rgb_target.reshape(-1, 3)))
 
@@ -52,7 +52,7 @@ if __name__ == "__main__":
     t_far = 8.0
 
     key = jax.random.PRNGKey(12345)
-    model = VeryTinyNeRFModel()
+    model = TinyNeRFModel()
 
     # it seems that the learning rate is sensitive to model, for ReLu, it is 1e-3
     # for Siren, it is 1.e-4
@@ -74,7 +74,7 @@ if __name__ == "__main__":
     ray_generator = Perspective(width=width, height=height, focal=focal)
 
     # TODO: change to DepthGuidedInfer?
-    # infer_renderer = Simple()
+    infer_renderer = Simple()
     # infer_renderer = DepthGuidedInfer()
     # infer_renderer = Hierarchical()
 
@@ -108,7 +108,6 @@ if __name__ == "__main__":
 
             key, _ = jax.random.split(key)
             image_recon, depth_recon, weight_recon = infer_renderer(model.bind(state.params),
-                                                                    model.bind(state.params),
                                                                     ray_bundle,
                                                                     key)
 

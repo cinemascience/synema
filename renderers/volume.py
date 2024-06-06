@@ -4,6 +4,7 @@ from typing import Callable
 
 import jax.numpy as jnp
 import jax.random
+import jax.random
 from jaxtyping import Array, Float
 
 import samplers.ray
@@ -47,7 +48,7 @@ class VolumeRenderer:
         # TODO: some implementation multiplies delta_t with the L2 norm of ray direction.
         alphas = 1. - jnp.exp(-opacities * delta_t)
         # TODO: we probably don't need this clipping. exp(-x) for x >= 0 will be in [1, 0]
-        clipped_densities = jnp.clip(1.0 - alphas, 1.0e-10, 1.0)
+        clipped_densities = jnp.clip(1.0 - alphas, 0., 1.0)
         # jnp.cumprod is inclusive scan, we need to add the first 1s ourselves.
         transmittance = jnp.cumprod(jnp.concatenate([jnp.ones_like(clipped_densities[..., :1]),
                                                      clipped_densities[..., :-1]], axis=-1),
@@ -72,10 +73,12 @@ class VolumeRenderer:
         rgb = jnp.einsum('ij,ijk->ik', weights, colors)
         # Similar to the above, but reducing (num_rays, num_samples) x (num_rays, num_samples) -> (num_rays)
         depth = jnp.einsum('ij,ij->i', weights, t_values)
+        # accumulated opacities become the alpha channel
+        alpha = jnp.einsum('ij->i', weights)
 
         # FIXME: Is this the right way to calculate depth?
         # depth = -depth * jnp.linalg.norm(ray_directions, axis=-1)
-        return rgb, depth, weights
+        return rgb, alpha, depth
 
     @abstractmethod
     def render(self, *args, **kwargs) -> \
@@ -111,18 +114,20 @@ class Hierarchical(VolumeRenderer):
                rng_key: jax.random.PRNGKey,
                *args, **kwargs):
         # Sample and render with the coarse model
-        _, weights, t_values = self.sample_rays(self.coarse_sampler,
-                                                coarse_field,
-                                                ray_bundle,
-                                                rng_key,
-                                                *args, **kwargs)
+        colors, weights, t_values = self.sample_rays(self.coarse_sampler,
+                                                     coarse_field,
+                                                     ray_bundle,
+                                                     rng_key,
+                                                     *args, **kwargs)
+        colors_coarse, _, _ = self.accumulate_samples(colors, weights, t_values)
 
         # Sample and render the fine model
         rng_key, _ = jax.random.split(rng_key)
         colors, weights, t_values = self.sample_rays(self.fine_sampler, fine_field, ray_bundle,
                                                      rng_key, t_values=t_values, weights=weights)
+        colors_fine, alpha, depths = self.accumulate_samples(colors, weights, t_values)
 
-        return self.accumulate_samples(colors, weights, t_values)
+        return (colors_coarse, colors_fine), alpha, depths
 
 
 @dataclass
@@ -170,7 +175,7 @@ class DepthGuidedInfer(DepthGuided):
         t_values = jnp.linspace(jax.scipy.stats.norm.ppf(0.05),
                                 jax.scipy.stats.norm.ppf(0.95),
                                 self.fine_sampler.n_samples)
-        weights = jax.scipy.stats.norm.pdf(t_values) #, loc=t_mean, scale=t_std)
+        weights = jax.scipy.stats.norm.pdf(t_values)  # , loc=t_mean, scale=t_std)
 
         rng_key, _ = jax.random.split(rng_key)
         colors, weights, t_values = self.sample_rays(self.fine_sampler, field_fn, ray_bundle,
