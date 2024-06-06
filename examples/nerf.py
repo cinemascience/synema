@@ -23,14 +23,15 @@ def create_train_step(key, model_coarse, model_fine, optimizer):
                                                                             jnp.empty((1024, 3))))},
                                     tx=optimizer)
 
-    renderer = Hierarchical()
+    train_renderer = Hierarchical()
 
     def loss_fn(params, ray_bundle: RayBundle, target, key):
-        rgb, depth, _ = renderer(model_coarse.bind(params['params_coarse']),
-                                 model_fine.bind(params['params_fine']),
-                                 ray_bundle,
-                                 key)
-        return jnp.mean(optax.l2_loss(rgb, target.reshape(-1, 3)))
+        (rgb_c, rgb_f), alpha, depth = train_renderer(model_coarse.bind(params['params_coarse']),
+                                                      model_fine.bind(params['params_fine']),
+                                                      ray_bundle,
+                                                      key)
+        return (jnp.mean(optax.l2_loss(rgb_c, target.reshape(-1, 3))) +
+                jnp.mean(optax.l2_loss(rgb_f, target.reshape(-1, 3))))
 
     @jax.jit
     def train_step(state, inputs, target, key):
@@ -47,12 +48,14 @@ if __name__ == '__main__':
 
     images = data["images"][..., :3]
     height, width = images.shape[1], images.shape[2]
+    alphas = data['images'][..., 3]
+    depths = jnp.nan_to_num(data["depths"].astype(jnp.float32), nan=0.)
 
     poses = data["poses"].astype(jnp.float32)
     focal = data["focal"]
 
-    t_near = 3.0
-    t_far = 8.
+    t_near = 2.0
+    t_far = 8.0
 
     key = jax.random.PRNGKey(54321)
     model_coarse = NeRFModel(num_hidden_layers=4, num_hidden_features=64)
@@ -98,10 +101,32 @@ if __name__ == '__main__':
             ray_bundle = ray_generator(pixel_coordinates, poses[-1], t_near, t_far)
 
             key, _ = jax.random.split(key)
-            image_recon, depth_recon, _ = renderer(model_coarse.bind(states.params['params_coarse']),
-                                                   model_fine.bind(states.params['params_fine']),
-                                                   ray_bundle,
-                                                   key)
+            (_, image_recon), alpha_recon, depth_recon = renderer(model_coarse.bind(states.params['params_coarse']),
+                                                                  model_fine.bind(states.params['params_fine']),
+                                                                  ray_bundle,
+                                                                  key)
             plt.imshow(image_recon.reshape((100, 100, 3)))
-            plt.savefig(str(i).zfill(6) + "png")
+            plt.savefig(str(i).zfill(6) + "rgb")
+            plt.close()
+            plt.imshow(optax.l2_loss(image_recon.reshape((100, 100, 3)) - images[..., :3, -1]))
+            plt.colorbar()
+            plt.savefig(str(i).zfill(6) + "rgb_diff")
+            plt.close()
+
+            plt.imshow(depth_recon.reshape((100, 100, 1)))
+            plt.colorbar()
+            plt.savefig(str(i).zfill(6) + "depth")
+            plt.close()
+            plt.imshow(jnp.abs(depth_recon.reshape((100, 100)) + depths[-1]))
+            plt.colorbar()
+            plt.savefig(str(i).zfill(6) + "depth_diff")
+            plt.close()
+
+            plt.imshow(jnp.sum(alpha_recon.reshape((100, 100, -1)), axis=-1))
+            plt.colorbar()
+            plt.savefig(str(i).zfill(6) + "alpha")
+            plt.close()
+            plt.imshow(jnp.abs(alpha_recon.reshape((100, 100)) - alphas[-1]))
+            plt.colorbar()
+            plt.savefig(str(i).zfill(6) + "alpha_diff")
             plt.close()
