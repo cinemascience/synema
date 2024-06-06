@@ -99,20 +99,23 @@ class InstantNGP(nn.Module):
     """
     num_hidden_features: int = 64
     high_dynamics: bool = False
-    position_encoder: nn.Module = HashGridEncoder()
+    position_encoder: nn.Module = HashGridEncoder(num_levels=8, table_size=2 ** 19, feature_dims=4)
     view_encoder: nn.Module = SphericalHarmonic4thEncoder()
 
     @nn.compact
     def __call__(self, input_points, input_views):
-        x = self.position_encoder(input_points)
+        encoded_points = self.position_encoder(input_points)
 
         # density MLP, one layer of ReLU
-        x = nn.Dense(features=self.num_hidden_features)(x)
+        x = nn.Dense(features=self.num_hidden_features)(encoded_points)
         x = nn.relu(x)
         x = nn.Dense(features=16)(x)
 
         # the first element is the log-space density
         densities = jnp.exp(x[..., 0])
+        # densities = nn.relu(x[..., 0])
+        # densities = nn.Dense(features=1)(x)
+        # densities = jnp.squeeze(nn.relu(densities))
 
         # color MLP, two layers of ReLu
         encoded_dir = self.view_encoder(input_views)
@@ -144,8 +147,8 @@ class SirenNeRFModel(nn.Module):
 
     @nn.compact
     def __call__(self, inputs, *args, **kwargs):
-        x = PositionalEncodingNeRF()(inputs) if self.apply_positional_encoding else inputs
-        x = Sine(hidden_features=self.num_hidden_features, is_first=True)(x)
+        inputs = PositionalEncodingNeRF()(inputs) if self.apply_positional_encoding else inputs
+        x = Sine(hidden_features=self.num_hidden_features, is_first=True)(inputs)
         for i in range(self.num_hidden_layers - 1):
             x = Sine(hidden_features=self.num_hidden_features)(x)
             if i == 3:
