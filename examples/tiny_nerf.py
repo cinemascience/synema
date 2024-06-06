@@ -5,7 +5,7 @@ import optax
 from flax.training.train_state import TrainState
 from tqdm import tqdm
 
-from models.nerfs import TinyNeRFModel
+from models.nerfs import TinyNeRFModel, InstantNGP, VeryTinyNeRFModel
 from renderers.ray_gen import Perspective
 from renderers.rays import RayBundle
 from renderers.volume import Simple
@@ -16,15 +16,17 @@ def create_train_step(key, model, optimizer):
     init_state = TrainState.create(apply_fn=model.apply,
                                    params=model.init(key, jnp.empty((1024, 3)), jnp.empty((1024, 3))),
                                    tx=optimizer)
-    renderer = Simple()
+    train_renderer = Simple()
 
-    def loss_fn(params, ray_bundle: RayBundle, target, key: jax.random.PRNGKey):
-        rgb, depth, _ = renderer(model.bind(params),
-                                 ray_bundle,
-                                 key)
-        return jnp.mean(optax.l2_loss(rgb, target.reshape(-1, 3)))
+    def loss_fn(params, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):
+        rgb, alpha, depth = train_renderer(model.bind(params),
+                                           ray_bundle,
+                                           key)
+        return (jnp.mean(optax.l2_loss(rgb, targets['rgb'].reshape(-1, 3))) +
+                jnp.mean(optax.l2_loss(alpha, targets['alpha'].reshape(-1, ))))
+        # return jnp.mean(optax.l2_loss(rgb, targets['rgb'].reshape(-1, 3)))
 
-    @jax.jit
+    # @jax.jit
     def train_step(state, ray_bundle: RayBundle, target, key: jax.random.PRNGKey):
         loss_val, grads = jax.value_and_grad(loss_fn)(state.params, ray_bundle, target, key)
         new_state = state.apply_gradients(grads=grads)
@@ -37,7 +39,7 @@ if __name__ == "__main__":
     data = jnp.load("../data/tangle_tiny.npz")
     # data = jnp.load("../data/tiny_nerf_data.npz")
 
-    images = data["images"][..., :3]
+    images = data["images"]
     height, width = images.shape[1], images.shape[2]
 
     depths = jnp.nan_to_num(data["depths"].astype(jnp.float32), nan=0.)
@@ -53,8 +55,8 @@ if __name__ == "__main__":
     t_far = 8.0
 
     key = jax.random.PRNGKey(12345)
-    model = TinyNeRFModel()
-    # model = InstantNGP()
+    # model = VeryTinyNeRFModel()
+    model = InstantNGP()
 
     # it seems that the learning rate is sensitive to model, for ReLu, it is 1e-3
     # for Siren, it is 1.e-4
@@ -82,7 +84,7 @@ if __name__ == "__main__":
         ray_bundle = ray_generator(pixel_coordinates, pose, t_near, t_far)
 
         # targets = (image[..., :3], depth)
-        targets = image[..., :3]
+        targets = {"rgb": image[..., :3], "alpha": image[..., 3], "depth": depth}
 
         key, subkey = jax.random.split(key)
         state, loss = train_step(state, ray_bundle, targets, subkey)
@@ -92,9 +94,9 @@ if __name__ == "__main__":
             ray_bundle = ray_generator(pixel_coordinates, poses[-1], t_near, t_far)
 
             key, _ = jax.random.split(key)
-            image_recon, depth_recon, weight_recon = renderer(model.bind(state.params),
-                                                              ray_bundle,
-                                                              key)
+            image_recon, alpha_recon, depth_recon = renderer(model.bind(state.params),
+                                                             ray_bundle,
+                                                             key)
 
             plt.imshow(image_recon.reshape((100, 100, 3)))
             plt.savefig(str(i).zfill(6) + "rgb")
@@ -107,11 +109,11 @@ if __name__ == "__main__":
             plt.colorbar()
             plt.savefig(str(i).zfill(6) + "depth_diff")
             plt.close()
-            plt.imshow(optax.l2_loss(image_recon.reshape((100, 100, 3)) - image[-1]))
+            plt.imshow(optax.l2_loss(image_recon.reshape((100, 100, 3)) - images[..., :3, -1]))
             plt.colorbar()
             plt.savefig(str(i).zfill(6) + "rgb_diff")
             plt.close()
-            plt.imshow(jnp.sum(weight_recon.reshape((100, 100, -1)), axis=-1))
+            plt.imshow(jnp.sum(alpha_recon.reshape((100, 100, -1)), axis=-1))
             plt.colorbar()
-            plt.savefig(str(i).zfill(6) + "weight")
+            plt.savefig(str(i).zfill(6) + "alpha")
             plt.close()
