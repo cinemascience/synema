@@ -23,8 +23,7 @@ def create_train_step(key, model, optimizer):
                                            ray_bundle,
                                            key)
         return (jnp.mean(optax.l2_loss(rgb, targets['rgb'].reshape(-1, 3))) +
-                jnp.mean(optax.l2_loss(alpha, targets['alpha'].reshape(-1, ))))
-        # return jnp.mean(optax.l2_loss(rgb, targets['rgb'].reshape(-1, 3)))
+                1.e-3 * jnp.mean(optax.l2_loss(alpha, targets['depth'].reshape(-1, ))))
 
     # @jax.jit
     def train_step(state, ray_bundle: RayBundle, target, key: jax.random.PRNGKey):
@@ -55,8 +54,8 @@ if __name__ == "__main__":
     t_far = 8.0
 
     key = jax.random.PRNGKey(12345)
-    # model = VeryTinyNeRFModel()
-    model = InstantNGP()
+    model = VeryTinyNeRFModel()
+    # model = InstantNGP()
 
     # it seems that the learning rate is sensitive to model, for ReLu, it is 1e-3
     # for Siren, it is 1.e-4
@@ -113,7 +112,7 @@ if __name__ == "__main__":
             plt.colorbar()
             plt.savefig(str(i).zfill(6) + "rgb_diff")
             plt.close()
-            plt.imshow(jnp.sum(alpha_recon.reshape((100, 100, -1)), axis=-1))
+            plt.imshow(alpha_recon.reshape((100, 100)))
             plt.colorbar()
             plt.savefig(str(i).zfill(6) + "alpha")
             plt.close()
