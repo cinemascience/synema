@@ -45,6 +45,28 @@ class Perspective(RayGenerator):
                          t_nears=t_near, t_fars=t_far)
 
 
+class Parallel(RayGenerator):
+    def generate(self,
+                 pixel_coordinates: Float[Array, "num_of_pixels 2"],
+                 pose: Float[Array, "4 4"],
+                 t_near: float,
+                 t_far: float) -> RayBundle:
+        i = pixel_coordinates[..., 1]
+        j = pixel_coordinates[..., 0]
+
+        i = (i - self.width * 0.5) / self.focal
+        j = -(j - self.height * 0.5) / self.focal
+        k = jnp.zeros_like(i)
+
+        translates = jnp.stack([i, j, k], axis=-1)
+        ray_origins = pose[:3, -1] + jnp.einsum('ij,kj->ik', translates, pose[:3, :3])
+
+        ray_dirs = jnp.broadcast_to(-1 * pose[:3, 2], jnp.shape(ray_origins))
+
+        return RayBundle(origins=ray_origins, directions=ray_dirs,
+                         t_nears=t_near, t_fars=t_far)
+
+
 # Note: camera.focal_point = camera.position + camera.distance * camera.direction
 #  pose = [ +X | +Y | +Z | P], camera.direction = -Z
 def generate_perspective_rays(pixel_coordinates, width, height, fov_deg, focal, pose):

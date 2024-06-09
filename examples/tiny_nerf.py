@@ -6,7 +6,7 @@ from flax.training.train_state import TrainState
 from tqdm import tqdm
 
 from models.nerfs import TinyNeRFModel, InstantNGP, VeryTinyNeRFModel
-from renderers.ray_gen import Perspective
+from renderers.ray_gen import Perspective, Parallel
 from renderers.rays import RayBundle
 from renderers.volume import Simple
 from samplers.pixel import Dense
@@ -35,7 +35,7 @@ def create_train_step(key, model, optimizer):
 
 
 if __name__ == "__main__":
-    data = jnp.load("../data/tangle_tiny.npz")
+    data = jnp.load("../data/tangle_tiny_parallel.npz")
     # data = jnp.load("../data/tiny_nerf_data.npz")
 
     images = data["images"]
@@ -45,6 +45,10 @@ if __name__ == "__main__":
     plt.imshow(depths[-1])
     plt.colorbar()
     plt.savefig("depth_gt")
+    plt.close()
+
+    plt.imshow(images[-1])
+    plt.savefig("rgb_gt")
     plt.close()
 
     poses = data["poses"].astype(jnp.float32)
@@ -69,7 +73,8 @@ if __name__ == "__main__":
 
     pixel_sampler = Dense(width=width, height=height)
     pixel_coordinates = pixel_sampler()
-    ray_generator = Perspective(width=width, height=height, focal=focal)
+    # ray_generator = Perspective(width=width, height=height, focal=focal)
+    ray_generator = Parallel(width, height, focal)
     renderer = Simple()
 
     for i in pbar:
