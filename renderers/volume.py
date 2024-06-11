@@ -18,7 +18,7 @@ class VolumeRenderer:
     def sample_radiance_field(field_fn: Callable,
                               points: Float[Array, "num_rays num_samples_per_ray 3"],
                               viewdirs: Float[Array, "num_rays 3"] = None) -> \
-            (Float[Array, "num_rays num_samples_per_ray 3"], Float[Array, "num_rays num_samples_per_ray"]):
+            (Float[Array, "num_rays num_samples_per_ray n_channels"], Float[Array, "num_rays num_samples_per_ray"]):
         """Sample radiance field
         Parameters:
             field_fn: field function mapping from position and view direction to color and density
@@ -83,7 +83,7 @@ class VolumeRenderer:
     @abstractmethod
     def render(self, *args, **kwargs) -> \
             (Float[Array, "num_rays 3"], Float[Array, "num_rays"], Float[Array, "num_rays num_sample_per_ray"]):
-        """Render the field"""
+        """Render the field, return color, alpha and depth"""
 
     def __call__(self, *args, **kwargs):
         return self.render(*args, **kwargs)
