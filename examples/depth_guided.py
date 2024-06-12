@@ -5,11 +5,11 @@ import optax
 from flax.training.train_state import TrainState
 from tqdm import tqdm
 
-from models.nerfs import TinyNeRFModel, SirenNeRFModel
+from models.nerfs import VeryTinyNeRFModel
 from renderers.ray_gen import Perspective
 from renderers.rays import RayBundle
-from renderers.volume import DepthGuided, Simple
-from samplers.pixel import Dense, MaskedUniformRandom
+from renderers.volume import Simple, DepthGuided
+from samplers.pixel import Dense
 
 
 def create_train_step(key, model, optimizer):
@@ -19,13 +19,12 @@ def create_train_step(key, model, optimizer):
     train_renderer = DepthGuided()
 
     def loss_fn(params, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):
-        rgb_target, depth_target = targets
         (_, rgb), _, _ = train_renderer(field_fn=model.bind(params),
                                         ray_bundle=ray_bundle,
                                         rng_key=key,
-                                        depth_gt=depth_target.reshape((-1, 1)))
-        # TODO: add loss on depth?
-        return jnp.mean(optax.l2_loss(rgb, rgb_target.reshape(-1, 3)))
+                                        depth_gt=targets['depth'].reshape((-1, 1)))
+
+        return jnp.mean(optax.l2_loss(rgb, targets['rgb'].reshape(-1, 3)))
 
     @jax.jit
     def train_step(state, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):
@@ -52,7 +51,7 @@ if __name__ == "__main__":
     t_far = 8.0
 
     key = jax.random.PRNGKey(12345)
-    model = TinyNeRFModel()
+    model = VeryTinyNeRFModel()
 
     # it seems that the learning rate is sensitive to model, for ReLu, it is 1e-3
     # for Siren, it is 1.e-4
@@ -62,14 +61,16 @@ if __name__ == "__main__":
 
     train_step, state = create_train_step(key, model, optimizer)
 
-    # pixel_sampler = Dense(width=width, height=height)
-    # pixel_coordinates = pixel_sampler()
+    pixel_sampler = Dense(width=width, height=height)
+    pixel_coordinates = pixel_sampler()
+
     # pixel_sampler = UniformRandom(width=width,
     #                               height=height,
     #                               n_samples=1024)
-    pixel_sampler = MaskedUniformRandom(width=width,
-                                        height=height,
-                                        n_samples=1024)
+
+    # pixel_sampler = MaskedUniformRandom(width=width,
+    #                                     height=height,
+    #                                     n_samples=1024)
 
     ray_generator = Perspective(width=width, height=height, focal=focal)
 
@@ -85,25 +86,27 @@ if __name__ == "__main__":
 
         image = images[image_idx]
         depth = depths[image_idx]
-        mask = jnp.logical_not(jnp.isnan(depth))
-        depth = -jnp.nan_to_num(depth, nan=0.)
+        # mask = jnp.logical_not(jnp.isnan(depth))
+        # depth = -jnp.nan_to_num(depth, nan=0.)
+        # depth = -depth
         pose = poses[image_idx]
 
-        key, subkey = jax.random.split(key)
-        pixel_coordinates = pixel_sampler(mask, key)
+        # key, subkey = jax.random.split(key)
+        # pixel_coordinates = pixel_sampler(mask, key)
+        # pixel_coordinates = pixel_sampler(key)
 
         ray_bundle = ray_generator(pixel_coordinates, pose, t_near, t_far)
 
-        # targets = (image[..., :3], depth)
-        targets = (image[pixel_coordinates[:, 0].astype(int), pixel_coordinates[:, 1].astype(int), :3],
-                   depth[pixel_coordinates[:, 0].astype(int), pixel_coordinates[:, 1].astype(int)])
+        targets = {'rgb': image[..., :3], 'depth': depth}
+        # targets = {'rgb': image[pixel_coordinates[:, 0].astype(int), pixel_coordinates[:, 1].astype(int), :3],
+        #            'depth': depth[pixel_coordinates[:, 0].astype(int), pixel_coordinates[:, 1].astype(int)]}
 
         key, subkey = jax.random.split(key)
         state, loss = train_step(state, ray_bundle, targets, subkey)
         pbar.set_description("Loss %f" % loss)
 
         if i % 100 == 0:
-            pixel_coordinates = Dense(width=width, height=height)()
+            # pixel_coordinates = Dense(width=width, height=height)()
             ray_bundle = ray_generator(pixel_coordinates, poses[-1], t_near, t_far)
 
             key, _ = jax.random.split(key)

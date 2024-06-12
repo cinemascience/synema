@@ -44,12 +44,6 @@ class StratifiedRandom(RaySampler):
         # N_pixels by N_samples of them.
         noise_shape = ray_bundle.origins.shape[:-1] + (self.n_samples,)
 
-        # FIXME: do we have to do this?
-        # if not jnp.isscalar(t_far):
-        #     t_far = t_far.reshape((-1, 1))
-        # if not jnp.isscalar(t_near):
-        #     t_near = t_near.reshape((-1, 1))
-
         t_values += jax.random.uniform(rng, shape=noise_shape) * (
                 ray_bundle.t_fars - ray_bundle.t_nears) / self.n_samples
         return t_values
@@ -131,6 +125,12 @@ class Importance(RaySampler):
 class DepthGuided(RaySampler):
     """Depth-guided sampling of rays inspired by https://barbararoessle.github.io/dense_depth_priors_nerf/.
      Use given ground truth depth value to sample rays.
+     Samples for background pixels are distributed between near and far planes.
+     Half of the samples for foreground pixels are distributed between the near and far values.
+     The second half of the samples for foreground pixels are drawn from the Gaussian distribution
+     centered at the depth prior.
+
+     Note: NaN depth values are used to signify background pixels.
     """
     sigma: float = 0.01
 
@@ -138,23 +138,15 @@ class DepthGuided(RaySampler):
                          ray_bundle: RayBundle,
                          rng_key: jax.random.PRNGKey,
                          depth_gt: Float[Array, "num_ray"]) -> Float[Array, "num_rays num_samples"]:
-        """Half of the samples are distributed between the near and far planes,
-        the second half draws from a Gaussian distribution centered around the
-        ground truth depth value.
-        """
-        # TODO: current version gives large error for BG pixels.
-        first, second = jax.random.split(rng_key)
-        num_rays = depth_gt.shape[0]
+        fg_key0, fg_key1, bg_key = jax.random.split(rng_key, 3)
 
-        first_half = jax.random.uniform(first,
-                                        (num_rays, self.n_samples // 2),
-                                        minval=ray_bundle.t_nears,
-                                        maxval=ray_bundle.t_fars)
+        bg_t_values = StratifiedRandom(self.n_samples).generate_samples(ray_bundle, bg_key)
 
-        second_half = jax.random.normal(second,
-                                        shape=(num_rays, self.n_samples // 2)) * self.sigma
-        second_half += depth_gt
+        first_half = StratifiedRandom(self.n_samples // 2).generate_samples(ray_bundle, fg_key0)
+        second_half = depth_gt + jax.random.normal(key=fg_key1,
+                                                   shape=first_half.shape) * self.sigma
+        fg_t_values = jnp.concatenate([first_half, second_half], axis=-1)
+        fg_t_values = jnp.sort(fg_t_values, axis=-1)
 
-        t_values = jnp.concatenate([first_half, second_half], axis=-1)
-        t_values = jnp.sort(t_values, axis=-1)
+        t_values = jnp.where(jnp.isnan(depth_gt), bg_t_values, fg_t_values)
         return t_values
