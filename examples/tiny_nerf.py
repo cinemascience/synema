@@ -5,8 +5,8 @@ import optax
 from flax.training.train_state import TrainState
 from tqdm import tqdm
 
-from models.nerfs import TinyNeRFModel, InstantNGP, VeryTinyNeRFModel
-from renderers.ray_gen import Perspective, Parallel
+from models.nerfs import TinyNeRFModel
+from renderers.ray_gen import Perspective
 from renderers.rays import RayBundle
 from renderers.volume import Simple
 from samplers.pixel import Dense
@@ -23,11 +23,11 @@ def create_train_step(key, model, optimizer):
                                            ray_bundle,
                                            key)
         return (jnp.mean(optax.l2_loss(rgb, targets['rgb'].reshape(-1, 3))) +
-                1.e-3 * jnp.mean(optax.l2_loss(alpha, targets['depth'].reshape(-1, ))))
+                1.e-5 * jnp.mean(jnp.abs(depth + targets['depth'].reshape((-1,)))))
 
-    # @jax.jit
-    def train_step(state, ray_bundle: RayBundle, target, key: jax.random.PRNGKey):
-        loss_val, grads = jax.value_and_grad(loss_fn)(state.params, ray_bundle, target, key)
+    @jax.jit
+    def train_step(state, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):
+        loss_val, grads = jax.value_and_grad(loss_fn)(state.params, ray_bundle, targets, key)
         new_state = state.apply_gradients(grads=grads)
         return new_state, loss_val
 
@@ -35,14 +35,15 @@ def create_train_step(key, model, optimizer):
 
 
 if __name__ == "__main__":
-    data = jnp.load("../data/tangle_tiny_parallel.npz")
+    # data = jnp.load("../data/tangle_tiny_parallel.npz")
+    data = jnp.load('../data/tangle_tiny.npz')
     # data = jnp.load("../data/tiny_nerf_data.npz")
 
     images = data["images"]
     height, width = images.shape[1], images.shape[2]
 
     depths = jnp.nan_to_num(data["depths"].astype(jnp.float32), nan=0.)
-    plt.imshow(depths[-1])
+    plt.imshow(-depths[-1])
     plt.colorbar()
     plt.savefig("depth_gt")
     plt.close()
@@ -58,7 +59,7 @@ if __name__ == "__main__":
     t_far = 8.0
 
     key = jax.random.PRNGKey(12345)
-    model = VeryTinyNeRFModel()
+    model = TinyNeRFModel()
     # model = InstantNGP()
 
     # it seems that the learning rate is sensitive to model, for ReLu, it is 1e-3
@@ -73,8 +74,8 @@ if __name__ == "__main__":
 
     pixel_sampler = Dense(width=width, height=height)
     pixel_coordinates = pixel_sampler()
-    # ray_generator = Perspective(width=width, height=height, focal=focal)
-    ray_generator = Parallel(width, height, focal)
+    ray_generator = Perspective(width=width, height=height, focal=focal)
+    # ray_generator = Parallel(width, height, focal)
     renderer = Simple()
 
     for i in pbar:
