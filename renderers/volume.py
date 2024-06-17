@@ -92,7 +92,8 @@ class VolumeRenderer:
 @dataclass
 class Simple(VolumeRenderer):
     # TODO: why type annotation doesn't work here?
-    ray_sampler = StratifiedRandom(n_samples=32)
+    # TODO: why is TinyNeRFNodel sensitive on n_samples?
+    ray_sampler = StratifiedRandom(n_samples=64)
 
     def render(self,
                field_fn: Callable,
@@ -106,7 +107,7 @@ class Simple(VolumeRenderer):
 @dataclass
 class Hierarchical(VolumeRenderer):
     coarse_sampler = StratifiedRandom(n_samples=64)
-    fine_sampler = Importance(n_samples=32)
+    fine_sampler = Importance(n_samples=128)
 
     def render(self,
                coarse_field: Callable,
@@ -135,11 +136,10 @@ class Hierarchical(VolumeRenderer):
 
 
 @dataclass
-class DepthGuided(Hierarchical):
+class DepthGuided(VolumeRenderer):
     """Depth-guided renderer inspired by https://barbararoessle.github.io/dense_depth_priors_nerf/.
-    Replace the coarse sampler in Hierarchical with DepthGuided and use one single field model.
     """
-    coarse_sampler = samplers.ray.DepthGuided(n_samples=16)
+    ray_sampler = samplers.ray.DepthGuided(n_samples=64)
 
     def render(self,
                field_fn: Callable,
@@ -147,10 +147,10 @@ class DepthGuided(Hierarchical):
                rng_key: jax.random.PRNGKey,
                depth_gt: Float[Array, "num_rays num_samples"],
                *args, **kwargs):
-        return super().render(field_fn, field_fn,
-                              ray_bundle, rng_key,
-                              depth_gt,
-                              *args, **kwargs)
+        colors, weights, t_values = self.sample_rays(self.ray_sampler, field_fn, ray_bundle, rng_key,
+                                                     depth_gt,
+                                                     *args, **kwargs)
+        return self.accumulate_samples(colors, weights, t_values)
 
 
 @dataclass

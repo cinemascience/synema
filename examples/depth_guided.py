@@ -19,17 +19,12 @@ def create_train_step(key, model, optimizer):
     train_renderer = DepthGuided()
 
     def loss_fn(params, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):
-        # FIXME: why doesn't the model/renderer predict correct z value (aka ~0.0)
-        #  for background pixels? Ans: The Importance ray sampler normalizes `weights`
-        #  to 1, thus making noise in depth to be integrated to 1 as well. We probably
-        #  should not use/reuse Hierarchical render for DepthGuided.
-        _, rgb, _, depth = train_renderer(field_fn=model.bind(params),
-                                          ray_bundle=ray_bundle,
-                                          rng_key=key,
-                                          depth_gt=targets['depth'].reshape((-1, 1))).values()
-        return jnp.mean(optax.l2_loss(rgb, targets['rgb'].reshape(-1, 3)))
-        # return (jnp.mean(optax.l2_loss(rgb, targets['rgb'].reshape(-1, 3))) +
-        #         1.e-5 * jnp.mean(jnp.abs(depth + jnp.nan_to_num(targets['depth'].reshape((-1,))))))
+        rgb, _, depth = train_renderer(field_fn=model.bind(params),
+                                       ray_bundle=ray_bundle,
+                                       rng_key=key,
+                                       depth_gt=-targets['depth'].reshape((-1, 1))).values()
+        return (jnp.mean(optax.l2_loss(rgb, targets['rgb'].reshape(-1, 3))) +
+                1.e-5 * jnp.mean(jnp.abs(depth + jnp.nan_to_num(targets['depth'].reshape((-1,))))))
 
     @jax.jit
     def train_step(state, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):
@@ -47,6 +42,11 @@ if __name__ == "__main__":
     height, width = images.shape[1], images.shape[2]
 
     depths = data["depths"].astype(jnp.float32)
+
+    plt.imshow(-jnp.nan_to_num(depths[-1]))
+    plt.colorbar()
+    plt.savefig("depth_gt")
+    plt.close()
 
     poses = data["poses"].astype(jnp.float32)
     focal = data["focal"].item()
@@ -106,9 +106,9 @@ if __name__ == "__main__":
             ray_bundle = ray_generator(pixel_coordinates, poses[-1], t_near, t_far)
 
             key, _ = jax.random.split(key)
-            image_recon, depth_recon, weight_recon = infer_renderer(model.bind(state.params),
-                                                                    ray_bundle,
-                                                                    key)
+            image_recon, alpha_recon, depth_recon = infer_renderer(model.bind(state.params),
+                                                                   ray_bundle,
+                                                                   key).values()
 
             plt.imshow(image_recon.reshape((100, 100, 3)))
             plt.savefig(str(i).zfill(6) + "rgb")
@@ -125,7 +125,7 @@ if __name__ == "__main__":
             plt.colorbar()
             plt.savefig(str(i).zfill(6) + "rgb_diff")
             plt.close()
-            plt.imshow(jnp.sum(weight_recon.reshape((100, 100, -1)), axis=-1))
+            plt.imshow(jnp.sum(alpha_recon.reshape((100, 100, -1)), axis=-1))
             plt.colorbar()
-            plt.savefig(str(i).zfill(6) + "weight")
+            plt.savefig(str(i).zfill(6) + "alpha")
             plt.close()
