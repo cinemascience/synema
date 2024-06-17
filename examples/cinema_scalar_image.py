@@ -77,7 +77,7 @@ def create_train_steps(key, model, optimizer):
     train_renderer = Simple()
 
     def loss_fn(params, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):
-        scalar, alpha, depth = train_renderer(model.bind(params), ray_bundle, key)
+        scalar, alpha, depth = train_renderer(model.bind(params), ray_bundle, key).values()
         return jnp.mean(optax.l2_loss(scalar, targets['scalar'].reshape(-1, 1)))
         # return (jnp.mean(optax.l2_loss(scalar, targets['scalar'].reshape(-1, 1))) +
         #         1.e-3 * jnp.mean(optax.l2_loss(depth, targets['depth'].reshape(-1, 1))))
@@ -137,7 +137,7 @@ if __name__ == "__main__":
         if i % 100 == 0:
             ray_bundle = ray_generator(pixel_coordinates, poses[0], t_near, t_far)
             key, subkey = jax.random.split(key)
-            scalar_recon, _, _ = renderer(model.bind(state.params), ray_bundle, subkey)
+            scalar_recon, _, _ = renderer(model.bind(state.params), ray_bundle, subkey).values()
 
             plt.imshow(scalar_recon.reshape((128, 128)))
             plt.colorbar()

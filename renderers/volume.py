@@ -78,7 +78,7 @@ class VolumeRenderer:
 
         # FIXME: Is this the right way to calculate depth?
         # depth = -depth * jnp.linalg.norm(ray_directions, axis=-1)
-        return rgb, alpha, depth
+        return {'rgb': rgb, 'alpha': alpha, 'depth': depth}
 
     @abstractmethod
     def render(self, *args, **kwargs) -> \
@@ -97,7 +97,8 @@ class Simple(VolumeRenderer):
     def render(self,
                field_fn: Callable,
                ray_bundle: RayBundle,
-               rng_key: jax.random.PRNGKey):
+               rng_key: jax.random.PRNGKey,
+               *args, **kwargs):
         colors, weights, t_values = self.sample_rays(self.ray_sampler, field_fn, ray_bundle, rng_key)
         return self.accumulate_samples(colors, weights, t_values)
 
@@ -105,7 +106,7 @@ class Simple(VolumeRenderer):
 @dataclass
 class Hierarchical(VolumeRenderer):
     coarse_sampler = StratifiedRandom(n_samples=64)
-    fine_sampler = Importance(n_samples=128)
+    fine_sampler = Importance(n_samples=32)
 
     def render(self,
                coarse_field: Callable,
@@ -119,23 +120,26 @@ class Hierarchical(VolumeRenderer):
                                                      ray_bundle,
                                                      rng_key,
                                                      *args, **kwargs)
-        colors_coarse, _, _ = self.accumulate_samples(colors, weights, t_values)
+        coarse_output = self.accumulate_samples(colors, weights, t_values)
 
         # Sample and render the fine model
         rng_key, _ = jax.random.split(rng_key)
         colors, weights, t_values = self.sample_rays(self.fine_sampler, fine_field, ray_bundle,
                                                      rng_key, t_values=t_values, weights=weights)
-        colors_fine, alpha, depths = self.accumulate_samples(colors, weights, t_values)
+        fine_output = self.accumulate_samples(colors, weights, t_values)
 
-        return (colors_coarse, colors_fine), alpha, depths
+        return {'coarse_rgb': coarse_output['rgb'],
+                'fine_rgb': fine_output['rgb'],
+                'alpha': fine_output['alpha'],
+                'depth': fine_output['depth']}
 
 
 @dataclass
 class DepthGuided(Hierarchical):
     """Depth-guided renderer inspired by https://barbararoessle.github.io/dense_depth_priors_nerf/.
-    Replace the coarse sampler with DepthGuided and use one single field model.
+    Replace the coarse sampler in Hierarchical with DepthGuided and use one single field model.
     """
-    coarse_sampler = samplers.ray.DepthGuided(n_samples=64)
+    coarse_sampler = samplers.ray.DepthGuided(n_samples=16)
 
     def render(self,
                field_fn: Callable,

@@ -26,10 +26,10 @@ def create_train_step(key, model_coarse, model_fine, optimizer):
     train_renderer = Hierarchical()
 
     def loss_fn(params, ray_bundle: RayBundle, target, key):
-        (rgb_c, rgb_f), alpha, depth = train_renderer(model_coarse.bind(params['params_coarse']),
-                                                      model_fine.bind(params['params_fine']),
-                                                      ray_bundle,
-                                                      key)
+        rgb_c, rgb_f, alpha, depth = train_renderer(model_coarse.bind(params['params_coarse']),
+                                                    model_fine.bind(params['params_fine']),
+                                                    ray_bundle,
+                                                    key).values()
         return (jnp.mean(optax.l2_loss(rgb_c, target.reshape(-1, 3))) +
                 jnp.mean(optax.l2_loss(rgb_f, target.reshape(-1, 3))))
 
@@ -101,10 +101,10 @@ if __name__ == '__main__':
             ray_bundle = ray_generator(pixel_coordinates, poses[-1], t_near, t_far)
 
             key, _ = jax.random.split(key)
-            (_, image_recon), alpha_recon, depth_recon = renderer(model_coarse.bind(states.params['params_coarse']),
-                                                                  model_fine.bind(states.params['params_fine']),
-                                                                  ray_bundle,
-                                                                  key)
+            _, image_recon, alpha_recon, depth_recon = renderer(model_coarse.bind(states.params['params_coarse']),
+                                                                model_fine.bind(states.params['params_fine']),
+                                                                ray_bundle,
+                                                                key).values()
             plt.imshow(image_recon.reshape((100, 100, 3)))
             plt.savefig(str(i).zfill(6) + "rgb")
             plt.close()

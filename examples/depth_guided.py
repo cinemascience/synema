@@ -19,12 +19,17 @@ def create_train_step(key, model, optimizer):
     train_renderer = DepthGuided()
 
     def loss_fn(params, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):
-        (_, rgb), _, _ = train_renderer(field_fn=model.bind(params),
-                                        ray_bundle=ray_bundle,
-                                        rng_key=key,
-                                        depth_gt=targets['depth'].reshape((-1, 1)))
-
+        # FIXME: why doesn't the model/renderer predict correct z value (aka ~0.0)
+        #  for background pixels? Ans: The Importance ray sampler normalizes `weights`
+        #  to 1, thus making noise in depth to be integrated to 1 as well. We probably
+        #  should not use/reuse Hierarchical render for DepthGuided.
+        _, rgb, _, depth = train_renderer(field_fn=model.bind(params),
+                                          ray_bundle=ray_bundle,
+                                          rng_key=key,
+                                          depth_gt=targets['depth'].reshape((-1, 1))).values()
         return jnp.mean(optax.l2_loss(rgb, targets['rgb'].reshape(-1, 3)))
+        # return (jnp.mean(optax.l2_loss(rgb, targets['rgb'].reshape(-1, 3))) +
+        #         1.e-5 * jnp.mean(jnp.abs(depth + jnp.nan_to_num(targets['depth'].reshape((-1,))))))
 
     @jax.jit
     def train_step(state, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):
@@ -41,7 +46,6 @@ if __name__ == "__main__":
     images = data["images"][..., :3]
     height, width = images.shape[1], images.shape[2]
 
-    # depths = jnp.nan_to_num(data["depths"].astype(jnp.float32), nan=0.)
     depths = data["depths"].astype(jnp.float32)
 
     poses = data["poses"].astype(jnp.float32)
@@ -68,16 +72,11 @@ if __name__ == "__main__":
     #                               height=height,
     #                               n_samples=1024)
 
-    # pixel_sampler = MaskedUniformRandom(width=width,
-    #                                     height=height,
-    #                                     n_samples=1024)
-
     ray_generator = Perspective(width=width, height=height, focal=focal)
 
     # TODO: change to DepthGuidedInfer?
     infer_renderer = Simple()
     # infer_renderer = DepthGuidedInfer()
-    # infer_renderer = Hierarchical()
 
     pbar = tqdm(range(5000))
     for i in pbar:
@@ -86,9 +85,6 @@ if __name__ == "__main__":
 
         image = images[image_idx]
         depth = depths[image_idx]
-        # mask = jnp.logical_not(jnp.isnan(depth))
-        # depth = -jnp.nan_to_num(depth, nan=0.)
-        # depth = -depth
         pose = poses[image_idx]
 
         # key, subkey = jax.random.split(key)
@@ -121,7 +117,7 @@ if __name__ == "__main__":
             plt.colorbar()
             plt.savefig(str(i).zfill(6) + "depth")
             plt.close()
-            plt.imshow(jnp.abs(depth_recon.reshape((100, 100)) + depths[-1]))
+            plt.imshow(jnp.abs(depth_recon.reshape((100, 100)) + jnp.nan_to_num(depths[-1])))
             plt.colorbar()
             plt.savefig(str(i).zfill(6) + "depth_diff")
             plt.close()

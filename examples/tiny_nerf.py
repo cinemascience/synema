@@ -21,7 +21,7 @@ def create_train_step(key, model, optimizer):
     def loss_fn(params, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):
         rgb, alpha, depth = train_renderer(model.bind(params),
                                            ray_bundle,
-                                           key)
+                                           key).values()
         return (jnp.mean(optax.l2_loss(rgb, targets['rgb'].reshape(-1, 3))) +
                 1.e-5 * jnp.mean(jnp.abs(depth + targets['depth'].reshape((-1,)))))
 
@@ -48,7 +48,7 @@ if __name__ == "__main__":
     plt.savefig("depth_gt")
     plt.close()
 
-    plt.imshow(images[-1])
+    plt.imshow(images[:, :, -1, :3])
     plt.savefig("rgb_gt")
     plt.close()
 
@@ -101,7 +101,7 @@ if __name__ == "__main__":
             key, _ = jax.random.split(key)
             image_recon, alpha_recon, depth_recon = renderer(model.bind(state.params),
                                                              ray_bundle,
-                                                             key)
+                                                             key).values()
 
             plt.imshow(image_recon.reshape((100, 100, 3)))
             plt.savefig(str(i).zfill(6) + "rgb")

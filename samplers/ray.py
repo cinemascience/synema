@@ -130,7 +130,8 @@ class DepthGuided(RaySampler):
      The second half of the samples for foreground pixels are drawn from the Gaussian distribution
      centered at the depth prior.
 
-     Note: NaN depth values are used to signify background pixels.
+     Note: NaN depth values are used to signify background pixels, this might change (to be 0) in
+      the future.
     """
     sigma: float = 0.01
 
