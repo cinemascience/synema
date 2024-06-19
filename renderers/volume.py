@@ -136,8 +136,9 @@ class Hierarchical(VolumeRenderer):
 
 
 @dataclass
-class DepthGuided(VolumeRenderer):
-    """Depth-guided renderer inspired by https://barbararoessle.github.io/dense_depth_priors_nerf/.
+class DepthGuidedTrain(VolumeRenderer):
+    """Depth-guided renderer (for training, when ground truth depth is available) inspired by
+     https://barbararoessle.github.io/dense_depth_priors_nerf/.
     """
     ray_sampler = samplers.ray.DepthGuided(n_samples=64)
 
@@ -147,17 +148,21 @@ class DepthGuided(VolumeRenderer):
                rng_key: jax.random.PRNGKey,
                depth_gt: Float[Array, "num_rays num_samples"],
                *args, **kwargs):
-        colors, weights, t_values = self.sample_rays(self.ray_sampler, field_fn, ray_bundle, rng_key,
+        colors, weights, t_values = self.sample_rays(self.ray_sampler,
+                                                     field_fn,
+                                                     ray_bundle, rng_key,
                                                      depth_gt,
                                                      *args, **kwargs)
         return self.accumulate_samples(colors, weights, t_values)
 
 
 @dataclass
-class DepthGuidedInfer(DepthGuided):
-    # TODO: unfinished.
-    coarse_sampler = StratifiedRandom(n_samples=32)
-    fine_sampler = Importance(n_samples=32, combine=False)
+class DepthGuidedInfer(VolumeRenderer):
+    """Depth-guided renderer (for inference, where ground truth depth value is missing) inspired by
+     https://barbararoessle.github.io/dense_depth_priors_nerf/.
+    """
+    coarse_sampler = StratifiedRandom(n_samples=64)
+    fine_sampler = Importance(n_samples=64, combine=True)
 
     def render(self,
                field_fn: Callable,
@@ -166,24 +171,28 @@ class DepthGuidedInfer(DepthGuided):
                *args, **kwargs):
         # The first half of the samples are used to render an approximate depth value
         # t_mean and standard deviation t_std
-        _, _, t_values = self.sample_rays(self.coarse_sampler,
-                                          field_fn,
-                                          ray_bundle,
-                                          rng_key,
+        _, _, t_values = self.sample_rays(ray_sampler=self.coarse_sampler,
+                                          field_fn=field_fn,
+                                          ray_bundle=ray_bundle,
+                                          rng=rng_key,
                                           *args, **kwargs)
         t_mean = jnp.mean(t_values, axis=-1)
         t_std = jnp.std(t_values, axis=-1)
 
         # Sample the second half according to N(t_mean, t_std)
-        # We first generate
-        t_values = jnp.linspace(jax.scipy.stats.norm.ppf(0.05),
-                                jax.scipy.stats.norm.ppf(0.95),
-                                self.fine_sampler.n_samples)
-        weights = jax.scipy.stats.norm.pdf(t_values)  # , loc=t_mean, scale=t_std)
-
+        # TODO: we could just turn this to use jax.random.normal in yet another RaySampler
+        t_values = jnp.linspace(jax.scipy.stats.norm.ppf(0.05, loc=t_mean, scale=t_std),
+                                jax.scipy.stats.norm.ppf(0.95, loc=t_mean, scale=t_std),
+                                self.fine_sampler.n_samples,
+                                axis=-1)
+        weights = jax.scipy.stats.norm.pdf(t_values, loc=t_mean[:, None], scale=t_std[:, None])
         rng_key, _ = jax.random.split(rng_key)
-        colors, weights, t_values = self.sample_rays(self.fine_sampler, field_fn, ray_bundle,
-                                                     rng_key, t_values=t_values, weights=weights)
+        colors, weights, t_values = self.sample_rays(ray_sampler=self.fine_sampler,
+                                                     field_fn=field_fn,
+                                                     ray_bundle=ray_bundle,
+                                                     rng=rng_key,
+                                                     t_values=t_values,
+                                                     weights=weights)
 
         return self.accumulate_samples(colors, weights, t_values)
 

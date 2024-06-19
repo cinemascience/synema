@@ -8,7 +8,7 @@ from tqdm import tqdm
 from models.nerfs import VeryTinyNeRFModel
 from renderers.ray_gen import Perspective
 from renderers.rays import RayBundle
-from renderers.volume import Simple, DepthGuided
+from renderers.volume import DepthGuidedInfer, DepthGuidedTrain
 from samplers.pixel import Dense
 
 
@@ -16,7 +16,7 @@ def create_train_step(key, model, optimizer):
     init_state = TrainState.create(apply_fn=model.apply,
                                    params=model.init(key, jnp.empty((1024, 3)), jnp.empty((1024, 3))),
                                    tx=optimizer)
-    train_renderer = DepthGuided()
+    train_renderer = DepthGuidedTrain()
 
     def loss_fn(params, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):
         rgb, _, depth = train_renderer(field_fn=model.bind(params),
@@ -48,6 +48,10 @@ if __name__ == "__main__":
     plt.savefig("depth_gt")
     plt.close()
 
+    plt.imshow(images[-1])
+    plt.savefig("rgb_gt")
+    plt.close()
+
     poses = data["poses"].astype(jnp.float32)
     focal = data["focal"].item()
 
@@ -74,14 +78,12 @@ if __name__ == "__main__":
 
     ray_generator = Perspective(width=width, height=height, focal=focal)
 
-    # TODO: change to DepthGuidedInfer?
-    infer_renderer = Simple()
-    # infer_renderer = DepthGuidedInfer()
+    infer_renderer = DepthGuidedInfer()
 
     pbar = tqdm(range(5000))
     for i in pbar:
         key, subkey = jax.random.split(key)
-        image_idx = jax.random.randint(subkey, (1,), minval=0, maxval=images.shape[0])[0]
+        image_idx = jax.random.randint(subkey, (1,), minval=0, maxval=images.shape[0] - 1)[0]
 
         image = images[image_idx]
         depth = depths[image_idx]
