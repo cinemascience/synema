@@ -13,7 +13,7 @@ from tqdm import tqdm
 from models.cinema import CinemaScalarImage
 from renderers.ray_gen import Parallel
 from renderers.rays import RayBundle
-from renderers.volume import Simple
+from renderers.volume import Simple, DepthGuided
 from samplers.pixel import Dense
 
 
@@ -74,13 +74,16 @@ def readCinemaDatabase():
 
 def create_train_steps(key, model, optimizer):
     init_state = TrainState.create(apply_fn=model.apply, params=model.init(key, jnp.empty((1024, 3))), tx=optimizer)
-    train_renderer = Simple()
+    train_renderer = DepthGuided()
 
     def loss_fn(params, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):
-        scalar, alpha, depth = train_renderer(model.bind(params), ray_bundle, key).values()
-        return jnp.mean(optax.l2_loss(scalar, targets['scalar'].reshape(-1, 1)))
-        # return (jnp.mean(optax.l2_loss(scalar, targets['scalar'].reshape(-1, 1))) +
-        #         1.e-3 * jnp.mean(optax.l2_loss(depth, targets['depth'].reshape(-1, 1))))
+        scalar, alpha, depth = train_renderer(field_fn=model.bind(params),
+                                              ray_bundle=ray_bundle,
+                                              rng_key=key,
+                                              depth_gt=targets['depth']).values()
+        return jnp.mean(optax.l2_loss(scalar, targets['scalar']))
+        # return (jnp.mean(optax.l2_loss(scalar, targets['scalar'])) +
+        #         1.e-4 * jnp.mean(jnp.abs(depth - targets['depth'])))
 
     @jax.jit
     def train_step(state, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):
@@ -97,6 +100,9 @@ if __name__ == "__main__":
 
     t_near = 0.
     t_far = 257.81808
+
+    depths = jnp.where(depths == 1.0, jnp.nan, depths)
+    depths = t_near + depths * (t_far - t_near)
 
     key = jax.random.PRNGKey(0)
     model = CinemaScalarImage()
@@ -115,6 +121,12 @@ if __name__ == "__main__":
     plt.imshow(scalars[0])
     plt.colorbar()
     plt.savefig('scalar_gt.png')
+    plt.close()
+
+    plt.imshow(depths[0])
+    plt.colorbar()
+    plt.savefig('depth_gt.png')
+    plt.close()
 
     pbar = tqdm(range(5000))
 
@@ -137,9 +149,19 @@ if __name__ == "__main__":
         if i % 100 == 0:
             ray_bundle = ray_generator(pixel_coordinates, poses[0], t_near, t_far)
             key, subkey = jax.random.split(key)
-            scalar_recon, _, _ = renderer(model.bind(state.params), ray_bundle, subkey).values()
+            scalar_recon, _, depth_recon = renderer(model.bind(state.params), ray_bundle, subkey).values()
 
             plt.imshow(scalar_recon.reshape((128, 128)))
             plt.colorbar()
             plt.savefig(str(i).zfill(6) + 'scalar_recon.png')
+            plt.close()
+
+            plt.imshow(depth_recon.reshape((128, 128, 1)))
+            plt.colorbar()
+            plt.savefig(str(i).zfill(6) + "depth")
+            plt.close()
+
+            plt.imshow(jnp.abs(depth_recon.reshape((128, 128)) - depths[0]))
+            plt.colorbar()
+            plt.savefig(str(i).zfill(6) + "depth_diff")
             plt.close()
