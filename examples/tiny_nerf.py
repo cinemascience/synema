@@ -5,8 +5,8 @@ import optax
 from flax.training.train_state import TrainState
 from tqdm import tqdm
 
-from models.nerfs import TinyNeRFModel
-from renderers.ray_gen import Perspective
+from models.nerfs import TinyNeRFModel, VeryTinyNeRFModel
+from renderers.ray_gen import Perspective, Parallel
 from renderers.rays import RayBundle
 from renderers.volume import Simple
 from samplers.pixel import Dense
@@ -36,7 +36,8 @@ def create_train_step(key, model, optimizer):
 
 if __name__ == "__main__":
     # data = jnp.load("../data/tangle_tiny_parallel.npz")
-    data = jnp.load('../data/tangle_tiny.npz')
+    data = jnp.load("../data/tangle_tiny_gray_parallel.npz")
+    # data = jnp.load('../data/tangle_tiny.npz')
     # data = jnp.load("../data/tiny_nerf_data.npz")
 
     images = data["images"]
@@ -48,7 +49,7 @@ if __name__ == "__main__":
     plt.savefig("depth_gt")
     plt.close()
 
-    plt.imshow(images[:, :, -1, :3])
+    plt.imshow(images[-1])
     plt.savefig("rgb_gt")
     plt.close()
 
@@ -59,7 +60,9 @@ if __name__ == "__main__":
     t_far = 8.0
 
     key = jax.random.PRNGKey(12345)
-    model = TinyNeRFModel()
+    # FIXME: use VeryTinyNeRFModel for the moment since TinyNeRFModel does
+    #  not work with the Simple renderer when n_sample=64.
+    model = VeryTinyNeRFModel()
     # model = InstantNGP()
 
     # it seems that the learning rate is sensitive to model, for ReLu, it is 1e-3
@@ -74,8 +77,8 @@ if __name__ == "__main__":
 
     pixel_sampler = Dense(width=width, height=height)
     pixel_coordinates = pixel_sampler()
-    ray_generator = Perspective(width=width, height=height, focal=focal)
-    # ray_generator = Parallel(width, height, focal)
+    # ray_generator = Perspective(width=width, height=height, focal=focal)
+    ray_generator = Parallel(width, height, 1.28225*2)
     renderer = Simple()
 
     for i in pbar:
