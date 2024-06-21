@@ -60,7 +60,7 @@ class VolumeRenderer:
                     *args, **kwargs):
         ray_samples = ray_sampler(ray_bundle, rng, *args, **kwargs)
 
-        viewdirs = ray_bundle.directions / jnp.linalg.norm(ray_bundle.directions)
+        viewdirs = ray_bundle.directions / jnp.linalg.norm(ray_bundle.directions, axis=-1, keepdims=True)
 
         colors, opacities = VolumeRenderer.sample_radiance_field(field_fn, ray_samples.points, viewdirs)
         weights = VolumeRenderer.accumulated_transmittance(opacities, ray_samples.t_values)
