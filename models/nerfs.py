@@ -95,7 +95,8 @@ class VeryTinyNeRFModel(nn.Module):
 
 class InstantNGP(nn.Module):
     r"""
-    Model from the InstantNGP paper https://arxiv.org/abs/2201.05989
+    Model from the InstantNGP paper https://arxiv.org/abs/2201.05989 with modification as
+     implemented by nerfstudio.
     """
     num_hidden_features: int = 64
     high_dynamics: bool = False
@@ -106,20 +107,21 @@ class InstantNGP(nn.Module):
     def __call__(self, input_points, input_views):
         encoded_points = self.position_encoder(input_points)
 
-        # density MLP, one layer of ReLU
+        # density MLP, two layers of ReLU
         x = nn.Dense(features=self.num_hidden_features)(encoded_points)
+        x = nn.relu(x)
+        x = nn.Dense(features=self.num_hidden_features)(x)
         x = nn.relu(x)
         x = nn.Dense(features=16)(x)
 
-        # the first element is the log-space density
-        densities = jnp.exp(x[..., 0])
-        # densities = nn.relu(x[..., 0])
-        # densities = nn.Dense(features=1)(x)
-        # densities = jnp.squeeze(nn.relu(densities))
+        # we use relu instead of exp since we do want density == 0 for empty space.
+        densities = nn.relu(x[..., 0])
 
-        # color MLP, two layers of ReLu
+        # color MLP, 3 layers of ReLu
         encoded_dir = self.view_encoder(input_views)
-        x = jnp.concatenate([x, encoded_dir], axis=-1)
+        x = jnp.concatenate([x[..., 1:], encoded_dir], axis=-1)
+        x = nn.Dense(features=self.num_hidden_features)(x)
+        x = nn.relu(x)
         x = nn.Dense(features=self.num_hidden_features)(x)
         x = nn.relu(x)
         x = nn.Dense(features=self.num_hidden_features)(x)

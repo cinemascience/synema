@@ -60,7 +60,7 @@ class VolumeRenderer:
                     *args, **kwargs):
         ray_samples = ray_sampler(ray_bundle, rng, *args, **kwargs)
 
-        viewdirs = ray_bundle.directions / jnp.linalg.norm(ray_bundle.directions)
+        viewdirs = ray_bundle.directions / jnp.linalg.norm(ray_bundle.directions, axis=-1, keepdims=True)
 
         colors, opacities = VolumeRenderer.sample_radiance_field(field_fn, ray_samples.points, viewdirs)
         weights = VolumeRenderer.accumulated_transmittance(opacities, ray_samples.t_values)
@@ -68,7 +68,7 @@ class VolumeRenderer:
 
     @staticmethod
     def accumulate_samples(colors, weights, t_values):
-        # Einstein's notation to compute weighted ave0rage of colors, i.e., sum(weights * colors)
+        # Einstein's notation to compute weighted average of colors, i.e., sum(weights * colors)
         # reducing (num_rays, num_samples) x (num_rays, num_samples, rgb) -> (num_rays, rgb)
         rgb = jnp.einsum('ij,ijk->ik', weights, colors)
         # Similar to the above, but reducing (num_rays, num_samples) x (num_rays, num_samples) -> (num_rays)

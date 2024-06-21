@@ -9,10 +9,8 @@ from renderers.rays import RayBundle
 
 @dataclass
 class RayGenerator:
-    # TODO: these are actually Camera properties
     width: int
     height: int
-    focal: float
 
     @abstractmethod
     def generate(self, *args, **kwargs) -> RayBundle:
@@ -24,12 +22,14 @@ class RayGenerator:
 
 @dataclass
 class Perspective(RayGenerator):
+    focal: float
+
     def generate(self,
                  pixel_coordinates: Float[Array, "num_of_pixels 2"],
                  pose: Float[Array, "4 4"],
                  t_near: float, t_far: float) -> RayBundle:
-        i = pixel_coordinates[..., 1]
-        j = pixel_coordinates[..., 0]
+        i = pixel_coordinates[..., 1] + 0.5
+        j = pixel_coordinates[..., 0] + 0.5
 
         i = (i - self.width * 0.5) / self.focal
         j = -(j - self.height * 0.5) / self.focal
@@ -38,26 +38,33 @@ class Perspective(RayGenerator):
         dirs = jnp.stack([i, j, k], axis=-1)
         ray_dirs = jnp.einsum('ij,kj->ik', dirs, pose[:3, :3])
 
-        # TODO: do we want to normalize ray_dirs or not?
         ray_origins = jnp.broadcast_to(pose[:3, -1], jnp.shape(ray_dirs))
 
         return RayBundle(origins=ray_origins, directions=ray_dirs,
                          t_nears=t_near, t_fars=t_far)
 
 
+@dataclass
 class Parallel(RayGenerator):
+    viewport_height: float
+    """
+    *Full* height of the viewport/projection plane in world coordinate, corresponding to
+    2 * ParallelScale in VTK
+    """
+
     def generate(self,
                  pixel_coordinates: Float[Array, "num_of_pixels 2"],
                  pose: Float[Array, "4 4"],
                  t_near: float,
                  t_far: float) -> RayBundle:
-        i = pixel_coordinates[..., 1]
-        j = pixel_coordinates[..., 0]
+        i = pixel_coordinates[..., 1] + 0.5
+        j = pixel_coordinates[..., 0] + 0.5
 
-        i = (i - self.width * 0.5) / self.focal
-        j = -(j - self.height * 0.5) / self.focal
+        i = (i / self.width - 0.5) * self.viewport_height
+        j = -(j / self.height - 0.5) * self.viewport_height
         k = jnp.zeros_like(i)
 
+        # FIXME: the reconstructed depth value is still slightly off (shifted/scaled).
         translates = jnp.stack([i, j, k], axis=-1)
         ray_origins = pose[:3, -1] + jnp.einsum('ij,kj->ik', translates, pose[:3, :3])
 
