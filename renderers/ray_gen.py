@@ -64,7 +64,6 @@ class Parallel(RayGenerator):
         j = -(j / self.height - 0.5) * self.viewport_height
         k = jnp.zeros_like(i)
 
-        # FIXME: the reconstructed depth value is still slightly off (shifted/scaled).
         translates = jnp.stack([i, j, k], axis=-1)
         ray_origins = pose[:3, -1] + jnp.einsum('ij,kj->ik', translates, pose[:3, :3])
 
