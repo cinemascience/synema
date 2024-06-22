@@ -5,7 +5,7 @@ import optax
 from flax.training.train_state import TrainState
 from tqdm import tqdm
 
-from models.nerfs import VeryTinyNeRFModel
+from models.nerfs import VeryTinyNeRFModel, SirenNeRFModel
 from renderers.ray_gen import Perspective
 from renderers.rays import RayBundle
 from renderers.volume import DepthGuidedInfer, DepthGuidedTrain
@@ -19,11 +19,12 @@ def create_train_step(key, model, optimizer):
     train_renderer = DepthGuidedTrain()
 
     def loss_fn(params, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):
-        rgb, _, depth = train_renderer(field_fn=model.bind(params),
+        rgb, alpha, depth = train_renderer(field_fn=model.bind(params),
                                        ray_bundle=ray_bundle,
                                        rng_key=key,
                                        depth_gt=-targets['depth'].reshape((-1, 1))).values()
         return (jnp.mean(optax.l2_loss(rgb, targets['rgb'].reshape(-1, 3))) +
+                0.05 * jnp.mean(optax.l2_loss(alpha, targets['alpha'].reshape(-1, ))) +
                 1.e-5 * jnp.mean(jnp.abs(depth + jnp.nan_to_num(targets['depth'].reshape((-1,))))))
 
     @jax.jit
@@ -38,7 +39,7 @@ def create_train_step(key, model, optimizer):
 if __name__ == "__main__":
     data = jnp.load("../data/tangle_tiny.npz")
 
-    images = data["images"][..., :3]
+    images = data["images"]
     height, width = images.shape[1], images.shape[2]
 
     depths = data["depths"].astype(jnp.float32)
@@ -59,7 +60,8 @@ if __name__ == "__main__":
     t_far = 8.0
 
     key = jax.random.PRNGKey(12345)
-    model = VeryTinyNeRFModel()
+    # model = VeryTinyNeRFModel()
+    model = SirenNeRFModel()
 
     # it seems that the learning rate is sensitive to model, for ReLu, it is 1e-3
     # for Siren, it is 1.e-4
@@ -95,7 +97,7 @@ if __name__ == "__main__":
 
         ray_bundle = ray_generator(pixel_coordinates, pose, t_near, t_far)
 
-        targets = {'rgb': image[..., :3], 'depth': depth}
+        targets = {'rgb': image[..., :3], 'alpha': image[..., 3], 'depth': depth}
         # targets = {'rgb': image[pixel_coordinates[:, 0].astype(int), pixel_coordinates[:, 1].astype(int), :3],
         #            'depth': depth[pixel_coordinates[:, 0].astype(int), pixel_coordinates[:, 1].astype(int)]}
 
@@ -123,7 +125,7 @@ if __name__ == "__main__":
             plt.colorbar()
             plt.savefig(str(i).zfill(6) + "depth_diff")
             plt.close()
-            plt.imshow(optax.l2_loss(image_recon.reshape((100, 100, 3)) - image[-1]))
+            plt.imshow(optax.l2_loss(image_recon.reshape((100, 100, 3)) - image[..., :3, -1]))
             plt.colorbar()
             plt.savefig(str(i).zfill(6) + "rgb_diff")
             plt.close()

@@ -5,8 +5,8 @@ import optax
 from flax.training.train_state import TrainState
 from tqdm import tqdm
 
-from models.nerfs import TinyNeRFModel, VeryTinyNeRFModel
-from renderers.ray_gen import Perspective, Parallel
+from models.nerfs import SirenNeRFModel
+from renderers.ray_gen import Parallel
 from renderers.rays import RayBundle
 from renderers.volume import Simple
 from samplers.pixel import Dense
@@ -23,7 +23,8 @@ def create_train_step(key, model, optimizer):
                                            ray_bundle,
                                            key).values()
         return (jnp.mean(optax.l2_loss(rgb, targets['rgb'].reshape(-1, 3))) +
-                1.e-5 * jnp.mean(jnp.abs(depth + targets['depth'].reshape((-1,)))))
+                0.25 * jnp.mean(optax.l2_loss(alpha, targets['alpha'].reshape(-1, ))) +
+                1.e-5 * jnp.mean(jnp.abs(depth + targets['depth'].reshape(-1,))))
 
     @jax.jit
     def train_step(state, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):
@@ -35,8 +36,8 @@ def create_train_step(key, model, optimizer):
 
 
 if __name__ == "__main__":
-    # data = jnp.load("../data/tangle_tiny_parallel.npz")
-    data = jnp.load("../data/tangle_tiny_gray_parallel.npz")
+    data = jnp.load("../data/tangle_tiny_parallel.npz")
+    # data = jnp.load("../data/tangle_tiny_gray_parallel.npz")
     # data = jnp.load('../data/tangle_tiny.npz')
     # data = jnp.load("../data/tiny_nerf_data.npz")
 
@@ -62,7 +63,8 @@ if __name__ == "__main__":
     key = jax.random.PRNGKey(12345)
     # FIXME: use VeryTinyNeRFModel for the moment since TinyNeRFModel does
     #  not work with the Simple renderer when n_sample=64.
-    model = VeryTinyNeRFModel()
+    # model = VeryTinyNeRFModel()
+    model = SirenNeRFModel()
     # model = InstantNGP()
 
     # it seems that the learning rate is sensitive to model, for ReLu, it is 1e-3
@@ -78,7 +80,7 @@ if __name__ == "__main__":
     pixel_sampler = Dense(width=width, height=height)
     pixel_coordinates = pixel_sampler()
     # ray_generator = Perspective(width=width, height=height, focal=focal)
-    ray_generator = Parallel(width, height, 1.28225*2)
+    ray_generator = Parallel(width, height, 1.28225 * 2)
     renderer = Simple()
 
     for i in pbar:
