@@ -93,7 +93,7 @@ class VolumeRenderer:
 class Simple(VolumeRenderer):
     # TODO: why type annotation doesn't work here?
     # TODO: why is TinyNeRFNodel sensitive on n_samples?
-    ray_sampler = StratifiedRandom(n_samples=64)
+    ray_sampler = StratifiedRandom(n_samples=16)
 
     def render(self,
                field_fn: Callable,

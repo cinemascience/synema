@@ -13,8 +13,8 @@ from tqdm import tqdm
 from models.cinema import CinemaScalarImage
 from renderers.ray_gen import Parallel
 from renderers.rays import RayBundle
-from renderers.volume import Simple, DepthGuided
-from samplers.pixel import Dense
+from renderers.volume import Simple
+from samplers.pixel import Dense, UniformRandom
 
 
 def readCinemaDatabase():
@@ -38,13 +38,16 @@ def readCinemaDatabase():
             # print(camera_near_far)
 
             # construct camera orientation matrix
-            camera_w = -camera_dir
+            camera_w = -camera_dir / numpy.linalg.norm(camera_dir)
             camera_u = numpy.cross(camera_up, camera_w)
-            camera_v = numpy.cross(camera_w, camera_u)
-            # normalize basis vectors
             camera_u = camera_u / numpy.linalg.norm(camera_u)
+            camera_v = numpy.cross(camera_w, camera_u)
             camera_v = camera_v / numpy.linalg.norm(camera_v)
-            camera_w = camera_w / numpy.linalg.norm(camera_w)
+
+            # normalize basis vectors
+            # camera_u = camera_u / numpy.linalg.norm(camera_u)
+            # camera_v = camera_v / numpy.linalg.norm(camera_v)
+            # camera_w = camera_w / numpy.linalg.norm(camera_w)
 
             pose = numpy.zeros((4, 4))
             pose[:3, 0] = camera_u
@@ -58,11 +61,11 @@ def readCinemaDatabase():
             channels = h2file.get('channels')
 
             depth = numpy.array(channels['Depth'])
-            depth = cv2.resize(depth, (128, 128))
+            # depth = cv2.resize(depth, (128, 128))
             depths.append(depth)
 
             elevation = numpy.array(channels['Elevation'])
-            elevation = cv2.resize(elevation, dsize=(128, 128))
+            # elevation = cv2.resize(elevation, dsize=(128, 128))
             scalars.append(elevation)
 
         poses = numpy.stack(poses, axis=0)
@@ -74,14 +77,14 @@ def readCinemaDatabase():
 
 def create_train_steps(key, model, optimizer):
     init_state = TrainState.create(apply_fn=model.apply, params=model.init(key, jnp.empty((1024, 3))), tx=optimizer)
-    train_renderer = DepthGuided()
+    train_renderer = Simple()
 
     def loss_fn(params, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):
         scalar, alpha, depth = train_renderer(field_fn=model.bind(params),
                                               ray_bundle=ray_bundle,
                                               rng_key=key,
                                               depth_gt=targets['depth']).values()
-        return jnp.mean(optax.l2_loss(scalar, targets['scalar']))
+        return jnp.mean(optax.l2_loss(scalar, targets['scalar'].reshape(-1, 1)))
         # return (jnp.mean(optax.l2_loss(scalar, targets['scalar'])) +
         #         1.e-4 * jnp.mean(jnp.abs(depth - targets['depth'])))
 
@@ -96,7 +99,18 @@ def create_train_steps(key, model, optimizer):
 
 if __name__ == "__main__":
     poses, depths, scalars = readCinemaDatabase()
+    height, width = scalars.shape[1], scalars.shape[2]
     scalars = jnp.nan_to_num(scalars)
+
+    plt.imshow(scalars[0])
+    plt.colorbar()
+    plt.savefig('scalar_gt.png')
+    plt.close()
+
+    plt.imshow(depths[0])
+    plt.colorbar()
+    plt.savefig('depth_gt.png')
+    plt.close()
 
     t_near = 0.
     t_far = 257.81808
@@ -113,20 +127,14 @@ if __name__ == "__main__":
 
     train_step, state = create_train_steps(key, model, optimizer)
 
-    pixel_sampler = Dense(width=128, height=128)
-    pixel_coordinates = pixel_sampler()
-    ray_generator = Parallel(128, 128, t_far)
+    # pixel_sampler = Dense(width=128, height=128)
+    # pixel_coordinates = pixel_sampler()
+    pixel_sampler = UniformRandom(width=width,
+                                  height=height,
+                                  n_samples=1024)
+
+    ray_generator = Parallel(width=width, height=height, viewport_height=t_far)
     renderer = Simple()
-
-    plt.imshow(scalars[0])
-    plt.colorbar()
-    plt.savefig('scalar_gt.png')
-    plt.close()
-
-    plt.imshow(depths[0])
-    plt.colorbar()
-    plt.savefig('depth_gt.png')
-    plt.close()
 
     pbar = tqdm(range(5000))
 
@@ -138,30 +146,41 @@ if __name__ == "__main__":
         depth = depths[image_idx]
         scalar = scalars[image_idx]
 
-        ray_bundle = ray_generator(pixel_coordinates, pose, t_near, t_far)
-        targets = {
-            'scalar': scalar.reshape((-1, 1)),
-            'depth': depth.reshape((-1, 1))}
+        # ray_bundle = ray_generator(pixel_coordinates, pose, t_near, t_far)
+        # targets = {
+        #     'scalar': scalar.reshape((-1, 1)),
+        #     'depth': depth.reshape((-1, 1))}
 
+        key, subkey = jax.random.split(key)
+        pixel_coordinates = pixel_sampler(rng=subkey)
+        ray_bundle = ray_generator(pixel_coordinates, pose, t_near, t_far)
+
+        targets = {
+            'scalar': scalar[pixel_coordinates[:, 0].astype(int), pixel_coordinates[:, 1].astype(int)],
+            'depth': depth[pixel_coordinates[:, 0].astype(int), pixel_coordinates[:, 1].astype(int)]}
+
+        key, subkey = jax.random.split(key)
         state, loss = train_step(state, ray_bundle, targets, subkey)
         pbar.set_description("Loss %f" % loss)
 
         if i % 100 == 0:
+            pixel_coordinates = Dense(width=width, height=height)()
             ray_bundle = ray_generator(pixel_coordinates, poses[0], t_near, t_far)
+
             key, subkey = jax.random.split(key)
             scalar_recon, _, depth_recon = renderer(model.bind(state.params), ray_bundle, subkey).values()
 
-            plt.imshow(scalar_recon.reshape((128, 128)))
+            plt.imshow(scalar_recon.reshape((width, height)))
             plt.colorbar()
             plt.savefig(str(i).zfill(6) + 'scalar_recon.png')
             plt.close()
 
-            plt.imshow(depth_recon.reshape((128, 128, 1)))
+            plt.imshow(depth_recon.reshape((width, height, 1)))
             plt.colorbar()
             plt.savefig(str(i).zfill(6) + "depth")
             plt.close()
 
-            plt.imshow(jnp.abs(depth_recon.reshape((128, 128)) - depths[0]))
+            plt.imshow(jnp.abs(depth_recon.reshape((width, height)) - depths[0]))
             plt.colorbar()
             plt.savefig(str(i).zfill(6) + "depth_diff")
             plt.close()

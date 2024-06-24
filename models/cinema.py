@@ -9,7 +9,7 @@ from models.siren import Sine
 class CinemaScalarImage(nn.Module):
     num_hidden_features = 64
     # position_encoder: HashGridEncoder = HashGridEncoder(num_levels=8, feature_dims=4, max_resolution=1024)
-    position_encoder: PositionalEncodingNeRF = PositionalEncodingNeRF(num_frequencies=10)
+    position_encoder: PositionalEncodingNeRF = PositionalEncodingNeRF(num_frequencies=6)
 
     def init_last(self, key, shape, dtype):
         v = jnp.sqrt(6. / shape[0]) / 30.0
@@ -44,33 +44,33 @@ class CinemaScalarImage(nn.Module):
         # return scalar, jnp.squeeze(density)
 
         # Simple MLP, does not work for num_layer > 4
-        # encoded_points = self.position_encoder(input_points)
-        # x = encoded_points
-        # for i in range(4):
-        #     x = nn.Dense(features=self.num_hidden_features)(x)
-        #     x = nn.relu(x)
-        # x = nn.Dense(features=2)(x)
-        # density, scalar = jnp.split(x, [1], axis=-1)
-        # density = nn.relu(density)
-        # return scalar, jnp.squeeze(density)
-
         encoded_points = self.position_encoder(input_points)
-        # density MLP, two layers of ReLU
-        x = nn.Dense(features=self.num_hidden_features)(encoded_points)
-        x = nn.relu(x)
-        x = nn.Dense(features=self.num_hidden_features)(x)
-        x = nn.relu(x)
-        x = nn.Dense(features=16)(x)
-
+        x = encoded_points
+        for i in range(4):
+            x = nn.Dense(features=self.num_hidden_features)(x)
+            x = nn.relu(x)
+        x = nn.Dense(features=2)(x)
         density, scalar = jnp.split(x, [1], axis=-1)
         density = nn.relu(density)
-
-        # scalar MLP, two layers of ReLU
-        scalar = jnp.concatenate([scalar, encoded_points], axis=-1)
-        scalar = nn.Dense(features=self.num_hidden_features)(scalar)
-        scalar = nn.relu(scalar)
-        scalar = nn.Dense(features=self.num_hidden_features)(scalar)
-        scalar = nn.relu(scalar)
-        scalar = nn.Dense(features=1)(scalar)
-
         return scalar, jnp.squeeze(density)
+
+        # encoded_points = self.position_encoder(input_points)
+        # # density MLP, two layers of ReLU
+        # x = nn.Dense(features=self.num_hidden_features)(encoded_points)
+        # x = nn.relu(x)
+        # x = nn.Dense(features=self.num_hidden_features)(x)
+        # x = nn.relu(x)
+        # x = nn.Dense(features=16)(x)
+        #
+        # density, scalar = jnp.split(x, [1], axis=-1)
+        # density = nn.relu(density)
+        #
+        # # scalar MLP, two layers of ReLU
+        # scalar = jnp.concatenate([scalar, encoded_points], axis=-1)
+        # scalar = nn.Dense(features=self.num_hidden_features)(scalar)
+        # scalar = nn.relu(scalar)
+        # scalar = nn.Dense(features=self.num_hidden_features)(scalar)
+        # scalar = nn.relu(scalar)
+        # scalar = nn.Dense(features=1)(scalar)
+        #
+        # return scalar, jnp.squeeze(density)
