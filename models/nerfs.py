@@ -139,8 +139,9 @@ class InstantNGP(nn.Module):
 class SirenNeRFModel(nn.Module):
     num_hidden_layers: int = 4
     num_hidden_features: int = 128
-    apply_positional_encoding: bool = True
     omega_0: float = 30.
+    position_encoder: nn.Module = PositionalEncodingNeRF(num_frequencies=10)
+    view_encoder: nn.Module = SphericalHarmonic4thEncoder()
 
     def init_last(self, key, shape, dtype):
         v = jnp.sqrt(6. / shape[0]) / self.omega_0
@@ -148,14 +149,30 @@ class SirenNeRFModel(nn.Module):
                                   minval=-v, maxval=v)
 
     @nn.compact
-    def __call__(self, inputs, *args, **kwargs):
-        inputs = PositionalEncodingNeRF()(inputs) if self.apply_positional_encoding else inputs
-        x = Sine(hidden_features=self.num_hidden_features, is_first=True)(inputs)
-        for i in range(self.num_hidden_layers - 1):
-            x = Sine(hidden_features=self.num_hidden_features)(x)
-            if i == 3:
-                x = jnp.concatenate([x, inputs], axis=-1)
-        return raw2output(nn.Dense(features=4, kernel_init=self.init_last)(x))
+    def __call__(self, input_points, input_views):
+        encoded_points = self.position_encoder(input_points)
+
+        # Note: it is empirically found that the number of density layers
+        # need to be larger than the number of color layers.
+        # density MLP, 3 layers of SIREN
+        x = Sine(hidden_features=self.num_hidden_features, is_first=True)(encoded_points)
+        x = Sine(hidden_features=self.num_hidden_features)(x)
+        x = Sine(hidden_features=self.num_hidden_features)(x)
+        x = nn.Dense(features=16, kernel_init=self.init_last)(x)
+
+        # we use relu instead of exp since we do want density == 0 for empty space.
+        densities = nn.relu(x[..., 0])
+
+        # color MLP, 2 layers of SIREN
+        encoded_dir = self.view_encoder(input_views)
+        x = jnp.concatenate([x[..., 1:], encoded_dir], axis=-1)
+
+        x = Sine(hidden_features=self.num_hidden_features)(x)
+        x = Sine(hidden_features=self.num_hidden_features)(x)
+        x = nn.Dense(features=3, kernel_init=self.init_last)(x)
+
+        colors = nn.sigmoid(x)
+        return colors, densities
 
 
 class ReLuNeRFModel(nn.Module):
