@@ -3,8 +3,7 @@ import jax.numpy as jnp
 import jax.random
 
 from encoders.frequency import PositionalEncodingNeRF
-from encoders.hashgrid import HashGridEncoder
-from models.siren import Sine
+from models.siren import Siren
 
 
 class CinemaScalarImage(nn.Module):
@@ -45,19 +44,12 @@ class CinemaScalarImage(nn.Module):
         # return scalar, jnp.squeeze(density)
 
         encoded_points = self.position_encoder(input_points)
-        x = Sine(hidden_features=self.num_hidden_features, is_first=True)(encoded_points)
-        x = Sine(hidden_features=self.num_hidden_features, is_first=False)(x)
-        x = Sine(hidden_features=self.num_hidden_features, is_first=False)(x)
-        x = Sine(hidden_features=self.num_hidden_features, is_first=False)(x)
-        x = nn.Dense(features=16, kernel_init=self.init_last)(x)
+        x = Siren(hidden_features=self.num_hidden_features, hidden_layers=4, out_features=16)(encoded_points)
         density, scalar = jnp.split(x, [1], axis=-1)
         density = nn.relu(density)
 
         scalar = jnp.concatenate([scalar, encoded_points], axis=-1)
-        scalar = Sine(hidden_features=self.num_hidden_features, is_first=True)(scalar)
-        scalar = Sine(hidden_features=self.num_hidden_features, is_first=False)(scalar)
-        scalar = nn.Dense(features=1, kernel_init=self.init_last)(scalar)
-
+        scalar = Siren(hidden_features=self.num_hidden_features, hidden_layers=2)(scalar)
         return scalar, jnp.squeeze(density)
 
         # encoded_points = self.position_encoder(input_points)
