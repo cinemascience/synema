@@ -45,7 +45,6 @@ class VolumeRenderer:
         delta_t = jnp.concatenate([delta_t,
                                    jnp.broadcast_to(1e10, delta_t[..., :1].shape)],
                                   axis=-1)
-        # TODO: some implementation multiplies delta_t with the L2 norm of ray direction.
         alphas = 1. - jnp.exp(-opacities * delta_t)
         # TODO: we probably don't need this clipping. exp(-x) for x >= 0 will be in [1, 0]
         clipped_densities = jnp.clip(1.0 - alphas, 0., 1.0)
@@ -76,8 +75,6 @@ class VolumeRenderer:
         # accumulated opacities become the alpha channel
         alpha = jnp.einsum('ij->i', weights)
 
-        # FIXME: Is this the right way to calculate depth?
-        # depth = -depth * jnp.linalg.norm(ray_directions, axis=-1)
         return {'rgb': rgb, 'alpha': alpha, 'depth': depth}
 
     @abstractmethod
