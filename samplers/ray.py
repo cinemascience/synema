@@ -75,7 +75,6 @@ class Importance(RaySampler):
             weights: array of relative importance
             rng: PRNG key
         Returns:
-            points: array of sampled points coordinates
             t_i: array of sampled t values
         """
 
@@ -84,9 +83,10 @@ class Importance(RaySampler):
             """
             Per-ray operations to be applied to each ray, we then vmap this operation the ray bundle.
             """
-            # Making sure the sum of weights is not too close to zero (happens when there is
-            # nothing in the scene), to prevent NaN when normalizing cfd.
-            ws += 1e-5
+            # The weights `ws` could be close to zero for "empty space" in the
+            # scene. This will cause cdf to be NaN, so as the rest of the
+            # computation and eventually for t_i. We replace NaN in t_i to t_near
+            # at the end, effectively putting the fine samples at the near plane.
             cdf = jnp.cumsum(ws, axis=-1)
             cdf = cdf / cdf[-1]
 
@@ -111,6 +111,9 @@ class Importance(RaySampler):
 
             if self.combine:
                 t_i = jnp.concatenate((t_i, ts))
+            t_i = jnp.nan_to_num(t_i, nan=ray_bundle.t_nears)
+            # u_i could also be mis-calculated when ws is close to zero.
+            t_i = jnp.clip(t_i, min=ray_bundle.t_nears, max=ray_bundle.t_fars)
 
             # Sort samples in t to facilitate volume rendering.
             t_i = jnp.sort(t_i)
