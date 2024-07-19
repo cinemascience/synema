@@ -87,7 +87,7 @@ class Importance(RaySampler):
             # scene. This will cause cdf to be NaN, so as the rest of the
             # computation and eventually for sampled t_i. In such a case, we
             # replace the "bad" sample with yet another uniform random sample
-            # between t_values[0] and t_values[-1].
+            # between ts[0] and ts[-1].
             cdf = jnp.cumsum(ws, axis=-1)
             cdf = cdf / cdf[-1]
 
