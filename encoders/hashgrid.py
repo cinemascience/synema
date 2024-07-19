@@ -13,7 +13,7 @@ class HashGridEncoder(nn.Module):
 
     # Number of levels (L)
     num_levels: int = 16
-    # Maximum entries per level (hash table size, T), 2**16 to 2**24
+    # Maximum entries per level (hash table size, T), 2**14 to 2**24
     # Recommended size F * T * L = 2 ** 24
     table_size: int = 2 ** 19
     # Number of feature dimensions per entry (F), 2
@@ -22,6 +22,8 @@ class HashGridEncoder(nn.Module):
     min_resolution: int = 16
     # Finest resolution (N_max), 512 to 524288
     max_resolution: int = 2 ** 19
+    # scale for parameter initialization
+    hash_init_scale: float = 1.e-4
 
     def setup(self):
         growth_factor = math.exp((math.log(self.max_resolution) - math.log(self.min_resolution)) /
@@ -35,8 +37,8 @@ class HashGridEncoder(nn.Module):
 
         self.hash_table = self.param("hash_table",
                                      lambda key, shape: jax.random.uniform(key, shape,
-                                                                           minval=-1.e-4,
-                                                                           maxval=1.e-4),
+                                                                           minval=-self.hash_init_scale,
+                                                                           maxval=self.hash_init_scale),
                                      (self.table_size * self.num_levels, self.feature_dims))
 
     def hash_function(self, ijk: Int32[Array, "num_of_points 8 3"]) -> UInt32[Array, "num_of_points 8"]:
@@ -61,7 +63,7 @@ class HashGridEncoder(nn.Module):
              encoded: encoded features
         """
 
-        def for_each_layer(vertices: Int32[Array, "num_of_points 8 3"],
+        def for_each_level(vertices: Int32[Array, "num_of_points 8 3"],
                            table_offset: jnp.uint32,
                            weight: Float[Array, "num_of_points 3"]) -> \
                 Float[Array, "num_of_points feature_dims"]:
@@ -119,7 +121,7 @@ class HashGridEncoder(nn.Module):
         # point falls to. There are L levels of grids.
         all_vertices = floors[:, :, jnp.newaxis, :] + vertices_of_cell[jnp.newaxis, jnp.newaxis, :]
 
-        encoded_vertices = jax.vmap(for_each_layer,
+        encoded_vertices = jax.vmap(for_each_level,
                                     in_axes=(1, 0, 1),
                                     out_axes=1)(all_vertices, self.table_offsets, weights)
         return encoded_vertices.reshape(points.shape[0], -1)

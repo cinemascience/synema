@@ -80,6 +80,7 @@ if __name__ == "__main__":
     pixel_sampler = Dense(width=width, height=height)
     pixel_coordinates = pixel_sampler()
     # ray_generator = Perspective(width=width, height=height, focal=focal)
+    # 1.28225 is the ParallelScale of the vtkCamera
     ray_generator = Parallel(width, height, 1.28225 * 2)
     renderer = Simple()
 
