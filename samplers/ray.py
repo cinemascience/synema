@@ -79,22 +79,24 @@ class Importance(RaySampler):
         """
 
         @jax.vmap
-        def for_each_ray(ts, ws, rng):
+        def for_each_ray(ts, ws, key):
             """
             Per-ray operations to be applied to each ray, we then vmap this operation the ray bundle.
             """
             # The weights `ws` could be close to zero for "empty space" in the
             # scene. This will cause cdf to be NaN, so as the rest of the
-            # computation and eventually for t_i. We replace NaN in t_i to t_near
-            # at the end, effectively putting the fine samples at the near plane.
+            # computation and eventually for sampled t_i. In such a case, we
+            # replace the "bad" sample with yet another uniform random sample
+            # between t_values[0] and t_values[-1].
             cdf = jnp.cumsum(ws, axis=-1)
             cdf = cdf / cdf[-1]
 
             # Uniformly sample the range of cdf. Note that it does not start with 0.
-            u_i = jax.random.uniform(rng,
+            key, subkey = jax.random.split(key)
+            u_i = jax.random.uniform(subkey,
+                                     shape=(self.n_samples,),
                                      minval=cdf[0],
-                                     maxval=cdf[-1],
-                                     shape=(self.n_samples,))
+                                     maxval=cdf[-1])
 
             # Search for the *bins* where the samples are.
             indices = jnp.searchsorted(cdf, u_i, side='right')
@@ -107,13 +109,22 @@ class Importance(RaySampler):
             delta_t = jnp.diff(ts)
             t_i = r_i * delta_t[indices] + ts[indices]
 
+            # Replace "bad" t_i with random sample
+            key, subkey = jax.random.split(key)
+            t_i = jnp.where(jnp.isnan(t_i),
+                            jax.random.uniform(subkey,
+                                               shape=(self.n_samples,),
+                                               minval=t_values[0],
+                                               maxval=t_values[-1]),
+                            t_i)
+            # r_i could also be mis-calculated when ws is close to zero even
+            # when there is no NaN.
+            t_i = jnp.clip(t_i, min=ray_bundle.t_nears, max=ray_bundle.t_fars)
+
             t_i = jax.lax.stop_gradient(t_i)
 
             if self.combine:
                 t_i = jnp.concatenate((t_i, ts))
-            t_i = jnp.nan_to_num(t_i, nan=ray_bundle.t_nears)
-            # u_i could also be mis-calculated when ws is close to zero.
-            t_i = jnp.clip(t_i, min=ray_bundle.t_nears, max=ray_bundle.t_fars)
 
             # Sort samples in t to facilitate volume rendering.
             t_i = jnp.sort(t_i)
