@@ -33,7 +33,8 @@ class VolumeRenderer:
         return jax.vmap(field_fn)(points, jnp.broadcast_to(viewdirs[:, None, :], points.shape))
 
     # Compute the accumulated transmittance T_i = exp(-sum(sigma_i delta_i))
-    # where delta_i = t_{i+1} - t_i for i = [0, N-1].
+    # where delta_i = t_{i+1} - t_i for i = [0, N-1]. The summation inside exp()
+    # is turned into product of exp(sigma_i delta_i), thus T_i = prod(exp(-sigma_i delta_i))
     @staticmethod
     def accumulated_transmittance(opacities: Float[Array, "num_pixels num_sample_per_ray"],
                                   t_vals: Float[Array, "num_pixels num_sample_per_ray"]) -> \
@@ -102,7 +103,7 @@ class Simple(VolumeRenderer):
 @dataclass
 class Hierarchical(VolumeRenderer):
     coarse_sampler = StratifiedRandom(n_samples=64)
-    fine_sampler = Importance(n_samples=128)
+    fine_sampler = Importance(n_samples=64)
 
     def render(self,
                coarse_field: Callable,
@@ -166,22 +167,37 @@ class DepthGuidedInfer(VolumeRenderer):
                *args, **kwargs):
         # The first half of the samples are used to render an approximate depth value
         # t_mean and standard deviation t_std
-        _, _, t_values = self.sample_rays(ray_sampler=self.coarse_sampler,
-                                          field_fn=field_fn,
-                                          ray_bundle=ray_bundle,
-                                          rng=rng_key,
-                                          *args, **kwargs)
-        t_mean = jnp.mean(t_values, axis=-1)
-        t_std = jnp.std(t_values, axis=-1)
+        rng_key, subkey = jax.random.split(rng_key)
+        _, weights, t_values = self.sample_rays(ray_sampler=self.coarse_sampler,
+                                                field_fn=field_fn,
+                                                ray_bundle=ray_bundle,
+                                                rng=subkey,
+                                                *args, **kwargs)
+        # t_mean is the expected value of t_values
+        t_mean = jnp.einsum('ij,ij->i', weights, t_values)
+        # t_variance is the expected value of (t_value - t_mean) ** 2
+        t_variance = jnp.einsum('ij,ij->i', weights, (t_values - t_mean[:, None]) ** 2)
+        t_std = jnp.sqrt(t_variance)
 
         # Sample the second half according to N(t_mean, t_std)
         # TODO: we could just turn this to use jax.random.normal in yet another RaySampler
-        t_values = jnp.linspace(jax.scipy.stats.norm.ppf(0.05, loc=t_mean, scale=t_std),
-                                jax.scipy.stats.norm.ppf(0.95, loc=t_mean, scale=t_std),
+        t_values = jnp.linspace(jax.scipy.stats.norm.ppf(0.023, loc=t_mean, scale=t_std),
+                                jax.scipy.stats.norm.ppf(0.977, loc=t_mean, scale=t_std),
                                 self.fine_sampler.n_samples,
                                 axis=-1)
+        # jax.debug.print("resample t_values min: {}, max: {}", t_values.min(), t_values.max())
+        t_values = jnp.clip(t_values, ray_bundle.t_nears, ray_bundle.t_fars)
+        # jax.debug.print("clipped t_values min: {}, max: {}", t_values.min(), t_values.max())
+
+        t_std = jnp.where(t_std == 0, 0.1, t_std)
+        # FIXME: pdf return NaN when t_std == 0. The process here is not good enough.
         weights = jax.scipy.stats.norm.pdf(t_values, loc=t_mean[:, None], scale=t_std[:, None])
-        rng_key, _ = jax.random.split(rng_key)
+        jax.debug.print("weights min: {}, max: {}", weights.min(), weights.max())
+        # t_values = jnp.nan_to_num(t_values)
+        weights = jnp.nan_to_num(weights)
+        weights = jnp.clip(weights, min=0)
+
+        rng_key, subkey = jax.random.split(rng_key)
         colors, weights, t_values = self.sample_rays(ray_sampler=self.fine_sampler,
                                                      field_fn=field_fn,
                                                      ray_bundle=ray_bundle,

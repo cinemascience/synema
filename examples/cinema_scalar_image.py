@@ -1,5 +1,6 @@
 import csv
 
+import flax.linen as nn
 import h5py
 import jax
 import jax.numpy as jnp
@@ -12,7 +13,7 @@ from tqdm import tqdm
 from models.cinema import CinemaScalarImage
 from renderers.ray_gen import Parallel
 from renderers.rays import RayBundle
-from renderers.volume import DepthGuidedTrain, DepthGuidedInfer
+from renderers.volume import DepthGuidedTrain, Hierarchical
 from samplers.pixel import Dense
 
 
@@ -42,7 +43,7 @@ def readCinemaDatabase():
             camera_v = numpy.cross(camera_w, camera_u)
             camera_v = camera_v / numpy.linalg.norm(camera_v)
 
-            # normalize the bbox to [-0.5, 0.5]^3
+            # normalize the bbox to [-0.5, 0.5]^3 to prevent vanishing gradient.
             camera_pos_normalized = 0.5 * camera_w
 
             pose = numpy.zeros((4, 4))
@@ -123,7 +124,7 @@ if __name__ == "__main__":
     pixel_coordinates = pixel_sampler()
 
     ray_generator = Parallel(width=width, height=height, viewport_height=t_far)
-    renderer = DepthGuidedInfer()
+    renderer = Hierarchical()
 
     pbar = tqdm(range(5000))
 
@@ -148,7 +149,8 @@ if __name__ == "__main__":
             ray_bundle = ray_generator(pixel_coordinates, poses[0], t_near, t_far)
 
             key, subkey = jax.random.split(key)
-            scalar_recon, _, depth_recon = renderer(model.bind(state.params), ray_bundle, subkey).values()
+            _, scalar_recon, _, depth_recon = renderer(model.bind(state.params), model.bind(state.params),
+                                                       ray_bundle, subkey).values()
 
             plt.imshow(scalar_recon.reshape((width, height)))
             plt.colorbar()
