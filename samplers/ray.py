@@ -114,8 +114,8 @@ class Importance(RaySampler):
             t_i = jnp.where(jnp.isnan(t_i),
                             jax.random.uniform(subkey,
                                                shape=(self.n_samples,),
-                                               minval=t_values[0],
-                                               maxval=t_values[-1]),
+                                               minval=ts[0],
+                                               maxval=ts[-1]),
                             t_i)
             # r_i could also be mis-calculated when ws is close to zero even
             # when there is no NaN.
