@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from renderers.rays import RayBundle
+from synema.renderers.rays import RayBundle
 
 
 @dataclass

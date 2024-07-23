@@ -7,9 +7,9 @@ import jax.random
 import jax.random
 from jaxtyping import Array, Float
 
-import samplers.ray
-from renderers.rays import RayBundle
-from samplers.ray import StratifiedRandom, Importance
+import synema.samplers.ray
+from synema.renderers.rays import RayBundle
+from synema.samplers.ray import StratifiedRandom, Importance
 
 
 @dataclass
@@ -151,7 +151,7 @@ class DepthGuidedTrain(VolumeRenderer):
     """Depth-guided renderer (for training, when ground truth depth is available) inspired by
      https://barbararoessle.github.io/dense_depth_priors_nerf/.
     """
-    ray_sampler = samplers.ray.DepthGuided(n_samples=64)
+    ray_sampler = synema.samplers.ray.DepthGuided(n_samples=64)
 
     def render(self,
                field_fn: Callable,

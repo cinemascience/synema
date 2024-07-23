@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-from renderers.rays import RayBundle, RaySamples
+from synema.renderers.rays import RayBundle, RaySamples
 
 
 @dataclass

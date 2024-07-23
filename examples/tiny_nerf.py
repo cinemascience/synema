@@ -5,11 +5,11 @@ import optax
 from flax.training.train_state import TrainState
 from tqdm import tqdm
 
-from models.nerfs import TinyNeRFModel, VeryTinyNeRFModel
-from renderers.ray_gen import Perspective, Parallel
-from renderers.rays import RayBundle
-from renderers.volume import Simple
-from samplers.pixel import Dense
+from synema.models.nerfs import VeryTinyNeRFModel
+from synema.renderers.ray_gen import Parallel
+from synema.renderers.rays import RayBundle
+from synema.renderers.volume import Simple
+from synema.samplers.pixel import Dense
 
 
 def create_train_step(key, model, optimizer):

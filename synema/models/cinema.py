@@ -2,8 +2,8 @@ import flax.linen as nn
 import jax.numpy as jnp
 import jax.random
 
-from encoders.hashgrid import HashGridEncoder
-from models.siren import Siren
+from synema.encoders.hashgrid import HashGridEncoder
+from synema.models.siren import Siren
 
 
 class CinemaScalarImage(nn.Module):
