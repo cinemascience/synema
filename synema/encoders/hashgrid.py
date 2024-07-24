@@ -20,7 +20,7 @@ class HashGridEncoder(nn.Module):
     feature_dims: int = 2
     # Coarsest resolution (N_min)
     min_resolution: int = 16
-    # Finest resolution (N_max), 512 to 524288
+    # Finest resolution (N_max), 512 to 524,288
     max_resolution: int = 2 ** 19
     # scale for parameter initialization
     hash_init_scale: float = 1.e-4
