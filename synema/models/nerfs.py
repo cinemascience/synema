@@ -6,7 +6,7 @@ from jax.typing import ArrayLike
 from synema.encoders.frequency import PositionalEncodingNeRF
 from synema.encoders.hashgrid import HashGridEncoder
 from synema.encoders.sh4 import SphericalHarmonic4thEncoder
-from synema.models.siren import Sine
+from synema.models.siren import Sine, SirenResidualBlock
 from synema.models.wire import Wire
 
 
@@ -176,8 +176,7 @@ class SirenNeRFModel(nn.Module):
 
 
 class SirenRBNeRFModel(nn.Module):
-    num_hidden_features: int = 128
-    omega_0: float = 30.
+    num_hidden_features: int = 64
     position_encoder: nn.Module = PositionalEncodingNeRF(num_frequencies=10)
     view_encoder: nn.Module = SphericalHarmonic4thEncoder()
 
@@ -185,14 +184,9 @@ class SirenRBNeRFModel(nn.Module):
     def __call__(self, input_points, input_views):
         encoded_points = self.position_encoder(input_points)
 
+        x = Sine(hidden_features=self.num_hidden_features, is_first=True)(encoded_points)
         x = SirenResidualBlock(hidden_features=self.num_hidden_features,
-                               omega_0=self.omega_0,
-                               out_features=self.num_hidden_features,
-                               is_first=True)(encoded_points)
-        x = SirenResidualBlock(hidden_features=self.num_hidden_features,
-                               omega_0=self.omega_0,
                                out_features=16,
-                               # is_first=True,
                                is_last=True)(x)
 
         # we use relu instead of exp since we do want density == 0 for empty space.
@@ -200,14 +194,10 @@ class SirenRBNeRFModel(nn.Module):
 
         encoded_dir = self.view_encoder(input_views)
         x = jnp.concatenate([x[..., 1:], encoded_dir], axis=-1)
+
+        x = Sine(hidden_features=self.num_hidden_features)(x)
         x = SirenResidualBlock(hidden_features=self.num_hidden_features,
-                               omega_0=self.omega_0,
-                               out_features=self.num_hidden_features,
-                               is_first=True)(x)
-        x = SirenResidualBlock(hidden_features=self.num_hidden_features,
-                               omega_0=self.omega_0,
                                out_features=3,
-                               # is_first=True,
                                is_last=True)(x)
 
         colors = nn.sigmoid(x)

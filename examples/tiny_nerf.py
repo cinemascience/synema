@@ -5,6 +5,7 @@ import optax
 from flax.training.train_state import TrainState
 from tqdm import tqdm
 
+from synema.models.nerfs import SirenRBNeRFModel
 from synema.renderers.ray_gen import Parallel
 from synema.renderers.rays import RayBundle
 from synema.renderers.volume import Simple
@@ -35,8 +36,8 @@ def create_train_step(key, model, optimizer):
 
 
 if __name__ == "__main__":
-    data = jnp.load("../data/tangle_tiny_parallel.npz")
-    # data = jnp.load("../data/tangle_tiny_gray_parallel.npz")
+    # data = jnp.load("../data/tangle_tiny_parallel.npz")
+    data = jnp.load("../data/tangle_tiny_gray_parallel.npz")
     # data = jnp.load('../data/tangle_tiny.npz')
     # data = jnp.load("../data/tiny_nerf_data.npz")
 

@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import jax.random
 
 from synema.encoders.hashgrid import HashGridEncoder
-from synema.models.siren import Siren
+from synema.models.siren import Sine, SirenResidualBlock
 
 
 class CinemaScalarImage(nn.Module):
@@ -27,10 +27,29 @@ class CinemaScalarImage(nn.Module):
     @nn.compact
     def __call__(self, input_points, input_views=None):
         encoded_points = self.position_encoder(input_points)
-        x = Siren(hidden_features=self.num_hidden_features, hidden_layers=4, out_features=16)(encoded_points)
+        # x = Siren(hidden_features=self.num_hidden_features, hidden_layers=4, out_features=16)(encoded_points)
+        # density, scalar = jnp.split(x, [1], axis=-1)
+        # density = nn.relu(density)
+        #
+        # scalar = jnp.concatenate([scalar, encoded_points], axis=-1)
+        # scalar = Siren(hidden_features=self.num_hidden_features, hidden_layers=2)(scalar)
+        # return scalar, jnp.squeeze(density)
+
+        x = Sine(hidden_features=self.num_hidden_features, is_first=True)(encoded_points)
+        x = SirenResidualBlock(hidden_features=self.num_hidden_features,
+                               out_features=self.num_hidden_features,
+                               is_last=False)(x)
+        x = SirenResidualBlock(hidden_features=self.num_hidden_features,
+                               out_features=16,
+                               is_last=True)(x)
+
         density, scalar = jnp.split(x, [1], axis=-1)
         density = nn.relu(density)
 
         scalar = jnp.concatenate([scalar, encoded_points], axis=-1)
-        scalar = Siren(hidden_features=self.num_hidden_features, hidden_layers=2)(scalar)
+        scalar = Sine(hidden_features=self.num_hidden_features)(scalar)
+        scalar = SirenResidualBlock(hidden_features=self.num_hidden_features,
+                                    out_features=1,
+                                    is_last=True)(scalar)
+
         return scalar, jnp.squeeze(density)

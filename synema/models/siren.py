@@ -42,7 +42,7 @@ class Siren(nn.Module):
 
 class SirenResidualBlock(nn.Module):
     hidden_features: int = 256
-    out_features: int = 256
+    out_features: int = hidden_features
     omega_0: float = 30.
     is_first: bool = False
     is_last: bool = False
