@@ -40,6 +40,31 @@ class Siren(nn.Module):
         return nn.Dense(features=self.out_features, kernel_init=self.init_last)(x)
 
 
+class SirenResidualBlock(nn.Module):
+    hidden_features: int = 256
+    out_features: int = 256
+    omega_0: float = 30.
+    is_first: bool = False
+    is_last: bool = False
+
+    def init_last(self, key, shape, dtype):
+        v = jnp.sqrt(6. / shape[0]) / self.omega_0
+        return jax.random.uniform(key=key, shape=shape, dtype=dtype,
+                                  minval=-v, maxval=v)
+
+    @nn.compact
+    def __call__(self, inputs, *args, **kwargs):
+        x = Sine(hidden_features=self.hidden_features, omega_0=self.omega_0,
+                 is_first=self.is_first)(inputs)
+        x = Sine(hidden_features=self.hidden_features, omega_0=self.omega_0,
+                 is_first=False)(x)
+        if inputs.shape[-1] == self.hidden_features:
+            x = 0.5 * (inputs + x)
+        if self.is_last:
+            x = nn.Dense(features=self.out_features, kernel_init=self.init_last)(x)
+        return x
+
+
 if __name__ == "__main__":
     key = jax.random.PRNGKey(0)
     x = jnp.ones((10, 2))

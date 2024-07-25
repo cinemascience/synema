@@ -175,6 +175,45 @@ class SirenNeRFModel(nn.Module):
         return colors, densities
 
 
+class SirenRBNeRFModel(nn.Module):
+    num_hidden_features: int = 128
+    omega_0: float = 30.
+    position_encoder: nn.Module = PositionalEncodingNeRF(num_frequencies=10)
+    view_encoder: nn.Module = SphericalHarmonic4thEncoder()
+
+    @nn.compact
+    def __call__(self, input_points, input_views):
+        encoded_points = self.position_encoder(input_points)
+
+        x = SirenResidualBlock(hidden_features=self.num_hidden_features,
+                               omega_0=self.omega_0,
+                               out_features=self.num_hidden_features,
+                               is_first=True)(encoded_points)
+        x = SirenResidualBlock(hidden_features=self.num_hidden_features,
+                               omega_0=self.omega_0,
+                               out_features=16,
+                               # is_first=True,
+                               is_last=True)(x)
+
+        # we use relu instead of exp since we do want density == 0 for empty space.
+        densities = nn.relu(x[..., 0])
+
+        encoded_dir = self.view_encoder(input_views)
+        x = jnp.concatenate([x[..., 1:], encoded_dir], axis=-1)
+        x = SirenResidualBlock(hidden_features=self.num_hidden_features,
+                               omega_0=self.omega_0,
+                               out_features=self.num_hidden_features,
+                               is_first=True)(x)
+        x = SirenResidualBlock(hidden_features=self.num_hidden_features,
+                               omega_0=self.omega_0,
+                               out_features=3,
+                               # is_first=True,
+                               is_last=True)(x)
+
+        colors = nn.sigmoid(x)
+        return colors, densities
+
+
 class ReLuNeRFModel(nn.Module):
     num_hidden_layers: int = 4
     num_hidden_features: int = 256

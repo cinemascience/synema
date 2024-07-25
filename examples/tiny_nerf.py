@@ -5,7 +5,6 @@ import optax
 from flax.training.train_state import TrainState
 from tqdm import tqdm
 
-from synema.models.nerfs import SirenNeRFModel
 from synema.renderers.ray_gen import Parallel
 from synema.renderers.rays import RayBundle
 from synema.renderers.volume import Simple
@@ -64,7 +63,8 @@ if __name__ == "__main__":
     # FIXME: use VeryTinyNeRFModel for the moment since TinyNeRFModel does
     #  not work with the Simple renderer when n_sample=64.
     # model = VeryTinyNeRFModel()
-    model = SirenNeRFModel()
+    # model = SirenNeRFModel()
+    model = SirenRBNeRFModel()
     # model = InstantNGP()
 
     # it seems that the learning rate is sensitive to model, for ReLu, it is 1e-3
