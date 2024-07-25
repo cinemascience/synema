@@ -1,7 +1,7 @@
 import flax.linen as nn
 
-from encoders.frequency import PositionalEncodingNeRF
-from models.siren import Siren
+from synema.encoders.frequency import PositionalEncodingNeRF
+from synema.models.siren import Siren
 
 
 class TruncatedDistanceFunction(nn.Module):

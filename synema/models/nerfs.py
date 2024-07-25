@@ -3,11 +3,11 @@ import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
-from encoders.frequency import PositionalEncodingNeRF
-from encoders.hashgrid import HashGridEncoder
-from encoders.sh4 import SphericalHarmonic4thEncoder
-from models.siren import Sine
-from models.wire import Wire
+from synema.encoders.frequency import PositionalEncodingNeRF
+from synema.encoders.hashgrid import HashGridEncoder
+from synema.encoders.sh4 import SphericalHarmonic4thEncoder
+from synema.models.siren import Sine
+from synema.models.wire import Wire
 
 
 def raw2output(x: ArrayLike) -> (ArrayLike, ArrayLike):

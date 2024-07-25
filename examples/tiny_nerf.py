@@ -5,11 +5,11 @@ import optax
 from flax.training.train_state import TrainState
 from tqdm import tqdm
 
-from models.nerfs import SirenNeRFModel
-from renderers.ray_gen import Parallel
-from renderers.rays import RayBundle
-from renderers.volume import Simple
-from samplers.pixel import Dense
+from synema.models.nerfs import SirenNeRFModel
+from synema.renderers.ray_gen import Parallel
+from synema.renderers.rays import RayBundle
+from synema.renderers.volume import Simple
+from synema.samplers.pixel import Dense
 
 
 def create_train_step(key, model, optimizer):
@@ -24,7 +24,7 @@ def create_train_step(key, model, optimizer):
                                            key).values()
         return (jnp.mean(optax.l2_loss(rgb, targets['rgb'].reshape(-1, 3))) +
                 0.25 * jnp.mean(optax.l2_loss(alpha, targets['alpha'].reshape(-1, ))) +
-                1.e-5 * jnp.mean(jnp.abs(depth + targets['depth'].reshape(-1,))))
+                1.e-5 * jnp.mean(jnp.abs(depth + targets['depth'].reshape(-1, ))))
 
     @jax.jit
     def train_step(state, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):

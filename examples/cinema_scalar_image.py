@@ -1,6 +1,5 @@
 import csv
 
-import flax.linen as nn
 import h5py
 import jax
 import jax.numpy as jnp
@@ -10,11 +9,11 @@ from flax.training.train_state import TrainState
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
-from models.cinema import CinemaScalarImage
-from renderers.ray_gen import Parallel
-from renderers.rays import RayBundle
-from renderers.volume import DepthGuidedTrain, Hierarchical
-from samplers.pixel import Dense
+from synema.models.cinema import CinemaScalarImage
+from synema.renderers.ray_gen import Parallel
+from synema.renderers.rays import RayBundle
+from synema.renderers.volume import DepthGuidedTrain, Hierarchical
+from synema.samplers.pixel import Dense
 
 
 def readCinemaDatabase():

@@ -7,9 +7,9 @@ import jax.random
 import jax.random
 from jaxtyping import Array, Float
 
-import samplers.ray
-from renderers.rays import RayBundle
-from samplers.ray import StratifiedRandom, Importance
+import synema.samplers.ray
+from synema.renderers.rays import RayBundle
+from synema.samplers.ray import StratifiedRandom, Importance
 
 
 @dataclass
@@ -31,6 +31,21 @@ class VolumeRenderer:
         # vmap vectorize along the num_rays dimension, we also add another dimension for num_samples
         # for viewdirs.
         return jax.vmap(field_fn)(points, jnp.broadcast_to(viewdirs[:, None, :], points.shape))
+
+    @staticmethod
+    def sample_radiance_field_batch(field_fn: Callable,
+                                    points: Float[Array, "num_rays num_samples_per_ray 3"],
+                                    viewdirs: Float[Array, "num_rays 3"] = None,
+                                    batch_size: int = 4096):
+        # TODO: this fixes the OOM problem for the moment, let's see if the
+        #  new jax.lax.map works better.
+        #  If so, use it and also making batched version as the default.
+        x = [VolumeRenderer.sample_radiance_field(field_fn,
+                                                  points[i:i + batch_size],
+                                                  viewdirs[i:i + batch_size])
+             for i in range(0, points.shape[0], batch_size)]
+        return (jnp.concat([x[i][0] for i in range(len(x))]),
+                jnp.concat([x[i][1] for i in range(len(x))]))
 
     # Compute the accumulated transmittance T_i = exp(-sum(sigma_i delta_i))
     # where delta_i = t_{i+1} - t_i for i = [0, N-1]. The summation inside exp()
@@ -62,7 +77,7 @@ class VolumeRenderer:
 
         viewdirs = ray_bundle.directions / jnp.linalg.norm(ray_bundle.directions, axis=-1, keepdims=True)
 
-        colors, opacities = VolumeRenderer.sample_radiance_field(field_fn, ray_samples.points, viewdirs)
+        colors, opacities = VolumeRenderer.sample_radiance_field_batch(field_fn, ray_samples.points, viewdirs)
         weights = VolumeRenderer.accumulated_transmittance(opacities, ray_samples.t_values)
         return colors, weights, ray_samples.t_values
 
@@ -103,7 +118,7 @@ class Simple(VolumeRenderer):
 @dataclass
 class Hierarchical(VolumeRenderer):
     coarse_sampler = StratifiedRandom(n_samples=64)
-    fine_sampler = Importance(n_samples=64)
+    fine_sampler = Importance(n_samples=128)
 
     def render(self,
                coarse_field: Callable,
@@ -136,7 +151,7 @@ class DepthGuidedTrain(VolumeRenderer):
     """Depth-guided renderer (for training, when ground truth depth is available) inspired by
      https://barbararoessle.github.io/dense_depth_priors_nerf/.
     """
-    ray_sampler = samplers.ray.DepthGuided(n_samples=64)
+    ray_sampler = synema.samplers.ray.DepthGuided(n_samples=64)
 
     def render(self,
                field_fn: Callable,

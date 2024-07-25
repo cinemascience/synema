@@ -5,11 +5,11 @@ from flax.training.train_state import TrainState
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
-from models.nerfs import NeRFModel
-from renderers.ray_gen import Perspective
-from renderers.rays import RayBundle
-from renderers.volume import Hierarchical
-from samplers.pixel import Dense, UniformRandom
+from synema.models.nerfs import NeRFModel
+from synema.renderers.ray_gen import Perspective
+from synema.renderers.rays import RayBundle
+from synema.renderers.volume import Hierarchical
+from synema.samplers.pixel import Dense, UniformRandom
 
 
 def create_train_step(key, model_coarse, model_fine, optimizer):
