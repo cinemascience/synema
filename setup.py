@@ -13,7 +13,7 @@ setup(
     install_requires=[
         'flax==0.8.5',
         'h5py==3.11.0',
-        'jax==0.4.30',
+        'jax>=0.4.30',
         'jaxtyping==0.2.33',
         'matplotlib==3.8.4',
         'numpy==1.26.4',
