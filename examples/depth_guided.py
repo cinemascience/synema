@@ -5,6 +5,7 @@ import optax
 from flax.training.train_state import TrainState
 from tqdm import tqdm
 
+from synema.models.nerfs import SirenNeRFModel
 from synema.renderers.ray_gen import Perspective
 from synema.renderers.rays import RayBundle
 from synema.renderers.volume import DepthGuidedInfer, DepthGuidedTrain

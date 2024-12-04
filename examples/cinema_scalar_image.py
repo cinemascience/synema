@@ -1,5 +1,8 @@
 import csv
+import os
+import shutil
 
+import flax.linen
 import h5py
 import jax
 import jax.numpy as jnp
@@ -14,6 +17,9 @@ from synema.renderers.ray_gen import Parallel
 from synema.renderers.rays import RayBundle
 from synema.renderers.volume import DepthGuidedTrain, Hierarchical
 from synema.samplers.pixel import Dense
+
+import orbax.checkpoint
+from flax.training import orbax_utils
 
 
 def readCinemaDatabase():
@@ -112,7 +118,7 @@ if __name__ == "__main__":
 
     key = jax.random.PRNGKey(0)
     model = CinemaScalarImage()
-
+    # print(flax.linen.tabulate(model, key)(jnp.empty((1024, 3))))
     schedule_fn = optax.exponential_decay(init_value=1e-3, transition_begin=600,
                                           transition_steps=200, decay_rate=0.5)
     optimizer = optax.adam(learning_rate=schedule_fn)
@@ -125,7 +131,7 @@ if __name__ == "__main__":
     ray_generator = Parallel(width=width, height=height, viewport_height=t_far)
     renderer = Hierarchical()
 
-    pbar = tqdm(range(5000))
+    pbar = tqdm(range(1000))
 
     for i in pbar:
         key, subkey = jax.random.split(key)
@@ -144,24 +150,37 @@ if __name__ == "__main__":
         state, loss = train_step(state, ray_bundle, targets, subkey)
         pbar.set_description("Loss %f" % loss)
 
-        if i % 100 == 0:
-            ray_bundle = ray_generator(pixel_coordinates, poses[0], t_near, t_far)
+        # if i % 100 == 0:
+        #     ray_bundle = ray_generator(pixel_coordinates, poses[0], t_near, t_far)
+        #
+        #     key, subkey = jax.random.split(key)
+        #     _, scalar_recon, _, depth_recon = renderer(model.bind(state.params), model.bind(state.params),
+        #                                                ray_bundle, subkey).values()
+        #
+        #     plt.imshow(scalar_recon.reshape((width, height)))
+        #     plt.colorbar()
+        #     plt.savefig(str(i).zfill(6) + 'scalar_recon.png')
+        #     plt.close()
+        #
+        #     plt.imshow(depth_recon.reshape((width, height, 1)))
+        #     plt.colorbar()
+        #     plt.savefig(str(i).zfill(6) + "depth")
+        #     plt.close()
+        #
+        #     plt.imshow(jnp.abs(depth_recon.reshape((width, height)) - jnp.nan_to_num(depths[0])))
+        #     plt.colorbar()
+        #     plt.savefig(str(i).zfill(6) + "depth_diff")
+        #     plt.close()
 
-            key, subkey = jax.random.split(key)
-            _, scalar_recon, _, depth_recon = renderer(model.bind(state.params), model.bind(state.params),
-                                                       ray_bundle, subkey).values()
+    # checkpoint
+    # ckpt = {'model': state, 'poses': poses, 'depths': depths, 'scalars': scalars}
+    chkpt = {'state': state}
+    # print(ckpt)
 
-            plt.imshow(scalar_recon.reshape((width, height)))
-            plt.colorbar()
-            plt.savefig(str(i).zfill(6) + 'scalar_recon.png')
-            plt.close()
+    chkpt_dir = '/home/ollie/PycharmProjects/synema/examples/checkpoints/cinema'
+    if os.path.exists(chkpt_dir):
+        shutil.rmtree(chkpt_dir)
 
-            plt.imshow(depth_recon.reshape((width, height, 1)))
-            plt.colorbar()
-            plt.savefig(str(i).zfill(6) + "depth")
-            plt.close()
-
-            plt.imshow(jnp.abs(depth_recon.reshape((width, height)) - jnp.nan_to_num(depths[0])))
-            plt.colorbar()
-            plt.savefig(str(i).zfill(6) + "depth_diff")
-            plt.close()
+    checkpointer = orbax.checkpoint.PyTreeCheckpointer()
+    # save_args = orbax_utils.save_args_from_target(ckpt)
+    checkpointer.save(chkpt_dir, chkpt)
