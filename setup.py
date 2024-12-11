@@ -19,6 +19,6 @@ setup(
         'numpy==1.26.4',
         'optax==0.2.3',
         'setuptools==69.0.3',
-        'tqdm==4.66.4'
+        'tqdm>=4.66.4'
     ]
 )

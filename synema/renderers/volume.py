@@ -27,7 +27,6 @@ class VolumeRenderer:
         Return:
             (colors, density) color and opacity predicted by the field function.
         """
-
         # vmap vectorize along the num_rays dimension, we also add another dimension for num_samples
         # for viewdirs.
         return jax.vmap(field_fn)(points, jnp.broadcast_to(viewdirs[:, None, :], points.shape))
@@ -37,9 +36,9 @@ class VolumeRenderer:
                                     points: Float[Array, "num_rays num_samples_per_ray 3"],
                                     viewdirs: Float[Array, "num_rays 3"] = None,
                                     batch_size: int = 4096):
-        # TODO: this fixes the OOM problem for the moment, let's see if the
-        #  new jax.lax.map works better.
-        #  If so, use it and also making batched version as the default.
+        # Note: This only fixes the OOM problem for inference.
+        # It does not help during training since we need to batch pixels before
+        # they are sent to the loss function (which is reverse-mode auto-diffed).
         x = [VolumeRenderer.sample_radiance_field(field_fn,
                                                   points[i:i + batch_size],
                                                   viewdirs[i:i + batch_size])
@@ -200,14 +199,11 @@ class DepthGuidedInfer(VolumeRenderer):
                                 jax.scipy.stats.norm.ppf(0.977, loc=t_mean, scale=t_std),
                                 self.fine_sampler.n_samples,
                                 axis=-1)
-        # jax.debug.print("resample t_values min: {}, max: {}", t_values.min(), t_values.max())
         t_values = jnp.clip(t_values, ray_bundle.t_nears, ray_bundle.t_fars)
-        # jax.debug.print("clipped t_values min: {}, max: {}", t_values.min(), t_values.max())
 
         t_std = jnp.where(t_std == 0, 0.1, t_std)
         # FIXME: pdf return NaN when t_std == 0. The process here is not good enough.
         weights = jax.scipy.stats.norm.pdf(t_values, loc=t_mean[:, None], scale=t_std[:, None])
-        jax.debug.print("weights min: {}, max: {}", weights.min(), weights.max())
         # t_values = jnp.nan_to_num(t_values)
         weights = jnp.nan_to_num(weights)
         weights = jnp.clip(weights, min=0)

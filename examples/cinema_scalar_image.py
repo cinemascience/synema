@@ -13,7 +13,7 @@ from synema.models.cinema import CinemaScalarImage
 from synema.renderers.ray_gen import Parallel
 from synema.renderers.rays import RayBundle
 from synema.renderers.volume import DepthGuidedTrain, Hierarchical
-from synema.samplers.pixel import Dense
+from synema.samplers.pixel import UniformRandom, Dense
 
 
 def readCinemaDatabase():
@@ -61,6 +61,8 @@ def readCinemaDatabase():
 
             elevation = numpy.array(channels['Elevation'])
             scalars.append(elevation)
+
+            h2file.close()
 
         poses = numpy.stack(poses, axis=0)
         depths = numpy.stack(depths, axis=0)
@@ -119,8 +121,11 @@ if __name__ == "__main__":
 
     train_step, state = create_train_steps(key, model, optimizer)
 
-    pixel_sampler = Dense(width=width, height=height)
-    pixel_coordinates = pixel_sampler()
+    # pixel_sampler = Dense(width=width, height=height)
+    pixel_sampler = UniformRandom(width=width,
+                                  height=height,
+                                  n_samples=4096)
+    # pixel_coordinates = pixel_sampler()
 
     ray_generator = Parallel(width=width, height=height, viewport_height=t_far)
     renderer = Hierarchical()
@@ -135,16 +140,21 @@ if __name__ == "__main__":
         depth = depths[image_idx]
         scalar = scalars[image_idx]
 
+        key, subkey = jax.random.split(key)
+        pixel_coordinates = pixel_sampler(rng=subkey)
+
         ray_bundle = ray_generator(pixel_coordinates, pose, t_near, t_far)
         targets = {
-            'scalar': scalar.reshape((-1, 1)),
-            'depth': depth.reshape((-1, 1))}
+            'scalar': scalar[pixel_coordinates[:, 0].astype(int), pixel_coordinates[:, 1].astype(int), None],
+            'depth': depth[pixel_coordinates[:, 0].astype(int), pixel_coordinates[:, 1].astype(int), None]
+        }
 
         key, subkey = jax.random.split(key)
         state, loss = train_step(state, ray_bundle, targets, subkey)
         pbar.set_description("Loss %f" % loss)
 
         if i % 100 == 0:
+            pixel_coordinates = Dense(width=width, height=height)()
             ray_bundle = ray_generator(pixel_coordinates, poses[0], t_near, t_far)
 
             key, subkey = jax.random.split(key)
