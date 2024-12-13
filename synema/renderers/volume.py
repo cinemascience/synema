@@ -193,20 +193,14 @@ class DepthGuidedInfer(VolumeRenderer):
         t_variance = jnp.einsum('ij,ij->i', weights, (t_values - t_mean[:, None]) ** 2)
         t_std = jnp.sqrt(t_variance)
 
-        # Sample the second half according to N(t_mean, t_std)
-        # TODO: we could just turn this to use jax.random.normal in yet another RaySampler
-        t_values = jnp.linspace(jax.scipy.stats.norm.ppf(0.023, loc=t_mean, scale=t_std),
-                                jax.scipy.stats.norm.ppf(0.977, loc=t_mean, scale=t_std),
+        # Sample the second half according to N(t_mean, t_std) for +- 3 t_std
+        t_values = jnp.linspace(t_mean - 3 * t_std,
+                                t_mean + 3 * t_std,
                                 self.fine_sampler.n_samples,
                                 axis=-1)
         t_values = jnp.clip(t_values, ray_bundle.t_nears, ray_bundle.t_fars)
 
-        t_std = jnp.where(t_std == 0, 0.1, t_std)
-        # FIXME: pdf return NaN when t_std == 0. The process here is not good enough.
         weights = jax.scipy.stats.norm.pdf(t_values, loc=t_mean[:, None], scale=t_std[:, None])
-        # t_values = jnp.nan_to_num(t_values)
-        weights = jnp.nan_to_num(weights)
-        weights = jnp.clip(weights, min=0)
 
         rng_key, subkey = jax.random.split(rng_key)
         colors, weights, t_values = self.sample_rays(ray_sampler=self.fine_sampler,
