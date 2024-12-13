@@ -1,9 +1,8 @@
 import flax.linen as nn
 import jax.numpy as jnp
-import jax.random
 
 from synema.encoders.hashgrid import HashGridEncoder
-from synema.models.siren import Sine, SirenResidualBlock, Siren
+from synema.models.siren import Siren
 
 
 class CinemaScalarImage(nn.Module):
@@ -18,11 +17,6 @@ class CinemaScalarImage(nn.Module):
                                                         feature_dims=4,
                                                         max_resolution=2 ** 12,
                                                         hash_init_scale=1.e-1)
-
-    def init_last(self, key, shape, dtype):
-        v = jnp.sqrt(6. / shape[0]) / 30.0
-        return jax.random.uniform(key=key, shape=shape, dtype=dtype,
-                                  minval=-v, maxval=v)
 
     @nn.compact
     def __call__(self, input_points, input_views=None):

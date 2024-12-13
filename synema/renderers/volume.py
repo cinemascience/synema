@@ -125,18 +125,18 @@ class Hierarchical(VolumeRenderer):
                ray_bundle: RayBundle,
                rng_key: jax.random.PRNGKey,
                *args, **kwargs):
+        coarse_key, fine_key = jax.random.split(rng_key, 2)
         # Sample and render with the coarse model
         colors, weights, t_values = self.sample_rays(self.coarse_sampler,
                                                      coarse_field,
                                                      ray_bundle,
-                                                     rng_key,
+                                                     coarse_key,
                                                      *args, **kwargs)
         coarse_output = self.accumulate_samples(colors, weights, t_values)
 
         # Sample and render the fine model
-        rng_key, _ = jax.random.split(rng_key)
         colors, weights, t_values = self.sample_rays(self.fine_sampler, fine_field, ray_bundle,
-                                                     rng_key, t_values=t_values, weights=weights)
+                                                     fine_key, t_values=t_values, weights=weights)
         fine_output = self.accumulate_samples(colors, weights, t_values)
 
         return {'coarse_rgb': coarse_output['rgb'],
@@ -181,11 +181,11 @@ class DepthGuidedInfer(VolumeRenderer):
                *args, **kwargs):
         # The first half of the samples are used to render an approximate depth value
         # t_mean and standard deviation t_std
-        rng_key, subkey = jax.random.split(rng_key)
+        coarse_key, fine_key = jax.random.split(rng_key)
         _, weights, t_values = self.sample_rays(ray_sampler=self.coarse_sampler,
                                                 field_fn=field_fn,
                                                 ray_bundle=ray_bundle,
-                                                rng=subkey,
+                                                rng=coarse_key,
                                                 *args, **kwargs)
         # t_mean is the expected value of t_values
         t_mean = jnp.einsum('ij,ij->i', weights, t_values)
@@ -202,11 +202,10 @@ class DepthGuidedInfer(VolumeRenderer):
 
         weights = jax.scipy.stats.norm.pdf(t_values, loc=t_mean[:, None], scale=t_std[:, None])
 
-        rng_key, subkey = jax.random.split(rng_key)
         colors, weights, t_values = self.sample_rays(ray_sampler=self.fine_sampler,
                                                      field_fn=field_fn,
                                                      ray_bundle=ray_bundle,
-                                                     rng=rng_key,
+                                                     rng=fine_key,
                                                      t_values=t_values,
                                                      weights=weights)
 
