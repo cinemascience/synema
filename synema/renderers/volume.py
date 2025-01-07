@@ -46,12 +46,16 @@ class VolumeRenderer:
         return (jnp.concat([x[i][0] for i in range(len(x))]),
                 jnp.concat([x[i][1] for i in range(len(x))]))
 
-    # Compute the accumulated transmittance T_i = exp(-sum(sigma_i delta_i))
+    # Compute weight used for quadrature for the volume rendering. First we compute
+    # the accumulated transmittance T_i = exp(-sum(sigma_i delta_i))
     # where delta_i = t_{i+1} - t_i for i = [0, N-1]. The summation inside exp()
-    # is turned into product of exp(sigma_i delta_i), thus T_i = prod(exp(-sigma_i delta_i))
+    # is turned into product of exp(sigma_i delta_i), thus T_i = prod(exp(-sigma_i delta_i)).
+    # We then compute the weights as element-wise product of T_i and alpha_i.
+    # See Eqn. 3 in the original paper on arXiv. Note that the weights are NOT normalized,
+    # i.e. sum(w_i) != 1 and could be very small for background pixels.
     @staticmethod
-    def accumulated_transmittance(densities: Float[Array, "num_pixels num_sample_per_ray"],
-                                  t_vals: Float[Array, "num_pixels num_sample_per_ray"]) -> \
+    def compute_weights(densities: Float[Array, "num_pixels num_sample_per_ray"],
+                        t_vals: Float[Array, "num_pixels num_sample_per_ray"]) -> \
             Float[Array, "num_pixels num_sample_per_ray"]:
         delta_t = jnp.diff(t_vals)
         # add one extra (huge) delta_N = t_{N+1} - t_N that does not
@@ -67,6 +71,17 @@ class VolumeRenderer:
         transmittance = jnp.cumprod(jnp.concatenate([jnp.ones_like(clipped_densities[..., :1]),
                                                      clipped_densities[..., :-1]], axis=-1),
                                     axis=-1)
+        # Note that the accumulated transmittance is monotonically decreasing w.r.t t_vals, thus
+        # the contribution of alphas (and thus densities/sigmas) to the final weights also
+        # decreases w.r.t. t_vals.
+        # This achieve a similar effect as the "first hit" for ray marching when the model is
+        # trained. In that case, the density function approximates delta functions located at
+        # the surfaces of the scene. The first "intersection" will dominate the accumulated
+        # transmittance while later intersections contributes close to zero to the transmittance.
+        # Thus we will have large weight correspond to the first hit and close to zero weight
+        # correspond to later hits. This explains why we don't see a blending of front and back
+        # surfaces for a close surface like sphere (for both color and depth values) in the
+        # final rendered images.
         return alphas * transmittance
 
     @staticmethod
@@ -77,7 +92,7 @@ class VolumeRenderer:
         viewdirs = ray_bundle.directions / jnp.linalg.norm(ray_bundle.directions, axis=-1, keepdims=True)
 
         colors, densities = VolumeRenderer.sample_radiance_field_batch(field_fn, ray_samples.points, viewdirs)
-        weights = VolumeRenderer.accumulated_transmittance(densities, ray_samples.t_values)
+        weights = VolumeRenderer.compute_weights(densities, ray_samples.t_values)
         return colors, weights, ray_samples.t_values
 
     @staticmethod
