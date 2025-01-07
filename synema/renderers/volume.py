@@ -21,11 +21,11 @@ class VolumeRenderer:
             (Float[Array, "num_rays num_samples_per_ray n_channels"], Float[Array, "num_rays num_samples_per_ray"]):
         """Sample radiance field
         Parameters:
-            field_fn: field function mapping from position and view direction to color and density
+            field_fn: field function mapping from positions and view directions to colors and densities
             points: points on rays to sample the field
             viewdirs: normalized directional vector of rays
         Return:
-            (colors, density) color and opacity predicted by the field function.
+            (colors, density) color and density predicted by the field function.
         """
         # vmap vectorize along the num_rays dimension, we also add another dimension for num_samples
         # for viewdirs.
@@ -50,17 +50,17 @@ class VolumeRenderer:
     # where delta_i = t_{i+1} - t_i for i = [0, N-1]. The summation inside exp()
     # is turned into product of exp(sigma_i delta_i), thus T_i = prod(exp(-sigma_i delta_i))
     @staticmethod
-    def accumulated_transmittance(opacities: Float[Array, "num_pixels num_sample_per_ray"],
+    def accumulated_transmittance(densities: Float[Array, "num_pixels num_sample_per_ray"],
                                   t_vals: Float[Array, "num_pixels num_sample_per_ray"]) -> \
             Float[Array, "num_pixels num_sample_per_ray"]:
         delta_t = jnp.diff(t_vals)
         # add one extra (huge) delta_N = t_{N+1} - t_N that does not
-        # exist to work with the shape of sampled opacities (but
+        # exist to work with the shape of sampled densities (but
         # provide negligible contribution).
         delta_t = jnp.concatenate([delta_t,
                                    jnp.broadcast_to(1e10, delta_t[..., :1].shape)],
                                   axis=-1)
-        alphas = 1. - jnp.exp(-opacities * delta_t)
+        alphas = 1. - jnp.exp(-densities * delta_t)
         # TODO: we probably don't need this clipping. exp(-x) for x >= 0 will be in [1, 0]
         clipped_densities = jnp.clip(1.0 - alphas, 0., 1.0)
         # jnp.cumprod is inclusive scan, we need to add the first 1s ourselves.
@@ -76,8 +76,8 @@ class VolumeRenderer:
 
         viewdirs = ray_bundle.directions / jnp.linalg.norm(ray_bundle.directions, axis=-1, keepdims=True)
 
-        colors, opacities = VolumeRenderer.sample_radiance_field_batch(field_fn, ray_samples.points, viewdirs)
-        weights = VolumeRenderer.accumulated_transmittance(opacities, ray_samples.t_values)
+        colors, densities = VolumeRenderer.sample_radiance_field_batch(field_fn, ray_samples.points, viewdirs)
+        weights = VolumeRenderer.accumulated_transmittance(densities, ray_samples.t_values)
         return colors, weights, ray_samples.t_values
 
     @staticmethod
@@ -87,7 +87,7 @@ class VolumeRenderer:
         rgb = jnp.einsum('ij,ijk->ik', weights, colors)
         # Similar to the above, but reducing (num_rays, num_samples) x (num_rays, num_samples) -> (num_rays)
         depth = jnp.einsum('ij,ij->i', weights, t_values)
-        # accumulated opacities become the alpha channel
+        # accumulated weights become the alpha channel
         alpha = jnp.einsum('ij->i', weights)
 
         return {'rgb': rgb, 'alpha': alpha, 'depth': depth}
