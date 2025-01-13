@@ -58,7 +58,7 @@ class HashGridEncoder(nn.Module):
             Float[Array, "num_of_points num_levels*feature_dims"]:
         r"""
         Args:
-             points: (x, y, z) coordinate of points
+             points: (x, y, z) coordinate of points, should be within the range of [0, 1]
         Returns:
              encoded: encoded features
         """
@@ -128,7 +128,7 @@ class HashGridEncoder(nn.Module):
 
 
 if __name__ == "__main__":
-    x = jnp.array([1.1, 2.2, 3.3]).reshape((-1, 3))
+    x = jnp.array([0.1, 0.2, 0.3]).reshape((-1, 3))
 
     key = jax.random.PRNGKey(0)
     encoder = HashGridEncoder()
