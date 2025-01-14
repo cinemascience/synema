@@ -65,13 +65,13 @@ class HashGridEncoder(nn.Module):
 
         def for_each_level(vertices: Int32[Array, "num_of_points 8 3"],
                            table_offset: jnp.uint32,
-                           weight: Float[Array, "num_of_points 3"]) -> \
+                           ws: Float[Array, "num_of_points 3"]) -> \
                 Float[Array, "num_of_points feature_dims"]:
             r"""
             Args:
                 vertices: i, j, k coordinates of the eight vertices.
                 table_offset: offset to the hash table at level
-                weight: interpolation weights
+                ws: interpolation weights
             Returns:
                 encoded: encoded features
             """
@@ -84,19 +84,13 @@ class HashGridEncoder(nn.Module):
             # FIXME: tensorboard shows this table lookup takes most of the time when doing backpropagation.
             features = self.hash_table[indices, :]
 
-            # tri-linear interpolation
-            # TODO: turn this into matrix multiplication or einsum?
-            weight = weight[..., jnp.newaxis]
-            one_minus_w = 1. - weight
-            f_01 = features[:, 0, :] * (one_minus_w[:, 0, :]) + features[:, 1, :] * weight[:, 0, :]
-            f_23 = features[:, 2, :] * (one_minus_w[:, 0, :]) + features[:, 3, :] * weight[:, 0, :]
-            f_45 = features[:, 4, :] * (one_minus_w[:, 0, :]) + features[:, 5, :] * weight[:, 0, :]
-            f_67 = features[:, 6, :] * (one_minus_w[:, 0, :]) + features[:, 7, :] * weight[:, 0, :]
-
-            f_0123 = f_01 * (one_minus_w[:, 1]) + f_23 * weight[:, 1]
-            f_4567 = f_45 * (one_minus_w[:, 1]) + f_67 * weight[:, 1]
-
-            encoded = f_0123 * (one_minus_w[:, 2]) + f_4567 * weight[:, 2]
+            # Tri-linear interpolation with matrix operations, inspired by TensoRF and
+            # https://github.com/Ending2015a/hash-grid-encoding
+            ws = ws[:, jnp.newaxis, :]  # [num_of_points, 1, 3]
+            ws = jnp.where(vertices_of_cell[jnp.newaxis, ...],  # [1, 8, 3]
+                           1 - ws, ws)  # [num_of_points, 8, 3]
+            ws = jnp.prod(ws, axis=-1)  # [num_of_points, 8]
+            encoded = jnp.einsum("ij,ijk->ik", ws, features)  # [num_of_points, feature_dims]
 
             return encoded
 
