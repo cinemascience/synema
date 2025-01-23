@@ -20,7 +20,9 @@ class CinemaScalarImage(nn.Module):
 
     @nn.compact
     def __call__(self, input_points, input_views=None):
-        # The Cinema Exporter is known to be normalized to the bbox of [-1, 1],
+        # We constructed the columns of the camera pose matrix for Cinema
+        # database normalized vectors, depth values are also in the range
+        # of [0, 1], making the points coordinates in the bbox of [-1, 1],
         # re-normalize to [0, 1] for hashgrid encoding.
         input_points = input_points + jnp.ones_like(input_points)
         input_points = input_points / 2.
