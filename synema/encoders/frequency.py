@@ -14,13 +14,17 @@ class PositionalEncodingNeRF(nn.Module):
     num_frequencies: int = 10
 
     @nn.compact
-    def __call__(self, inputs: Float[Array, "num_of_points 3"], *args, **kwargs) -> Float[
+    def __call__(self, inputs: Float[Array, "num_of_points 3"]) -> Float[
         Array, "num_of_points num_frequencies*2"]:
+        """
+        Args: inputs, coordinates of points, for best downstream quality,
+         should be normalized to the range of [0, 1].
+        """
         # The original paper claimed to multiply input with PI before sending
         # to sin/cos.
         # However, the real implementation does not do so.
-        # In addition, multiplying PI also makes VeryTinyNeRFModel fail to
-        # learn about the scene.
+        # inputs = inputs * 2. * jnp.pi
+
         pos = jnp.hstack(jax.vmap(lambda freq: inputs * 2.0 ** freq)(jnp.arange(self.num_frequencies)))
         return jnp.hstack((jnp.sin(pos), jnp.cos(pos)))
 
