@@ -11,9 +11,9 @@ setup(
     author_email='ollie@lanl.gov',
     description='View Synthesis for Cinema',
     install_requires=[
-        'flax==0.8.5',
+        'flax==0.10.4',
         'h5py==3.11.0',
-        'jax>=0.4.30',
+        'jax>=0.5.2',
         'jaxtyping==0.2.33',
         'matplotlib==3.8.4',
         'numpy==1.26.4',
