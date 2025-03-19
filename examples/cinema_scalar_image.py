@@ -1,5 +1,6 @@
 import csv
 
+import flax.linen
 import h5py
 import jax
 import jax.numpy as jnp
@@ -121,18 +122,19 @@ if __name__ == "__main__":
 
     train_step, state = create_train_steps(key, model, optimizer)
 
-    # pixel_sampler = Dense(width=width, height=height)
-    pixel_sampler = UniformRandom(width=width,
-                                  height=height,
-                                  n_samples=4096)
+    pixel_sampler = Dense(width=width, height=height)
+    # pixel_sampler = UniformRandom(width=width,
+    #                               height=height,
+    #                               n_samples=4096)
     # pixel_coordinates = pixel_sampler()
 
     ray_generator = Parallel(width=width, height=height, viewport_height=t_far)
     renderer = Hierarchical()
 
-    pbar = tqdm(range(5000))
+    pbar = tqdm(range(1000))
 
     for i in pbar:
+        # print(jax.local_devices()[0].memory_stats())
         key, subkey = jax.random.split(key)
         image_idx = jax.random.randint(subkey, shape=(1,), minval=1, maxval=scalars.shape[0])[0]
 
@@ -141,7 +143,7 @@ if __name__ == "__main__":
         scalar = scalars[image_idx]
 
         key, subkey = jax.random.split(key)
-        pixel_coordinates = pixel_sampler(rng=subkey)
+        pixel_coordinates = pixel_sampler()#(rng=subkey)
 
         ray_bundle = ray_generator(pixel_coordinates, pose, t_near, t_far)
         targets = {
@@ -154,24 +156,24 @@ if __name__ == "__main__":
         pbar.set_description("Loss %f" % loss)
 
         if i % 100 == 0:
-            pixel_coordinates = Dense(width=width, height=height)()
-            ray_bundle = ray_generator(pixel_coordinates, poses[0], t_near, t_far)
+            pixel_coordinates_inf = Dense(width=512, height=512)()
+            ray_bundle = Parallel(width=512, height=512, viewport_height=1)(pixel_coordinates_inf, poses[0], t_near, t_far)
 
             key, subkey = jax.random.split(key)
             _, scalar_recon, _, depth_recon = renderer(model.bind(state.params), model.bind(state.params),
                                                        ray_bundle, subkey).values()
 
-            plt.imshow(scalar_recon.reshape((width, height)))
+            plt.imshow(scalar_recon.reshape((512, 512)))
             plt.colorbar()
             plt.savefig(str(i).zfill(6) + 'scalar_recon.png')
             plt.close()
 
-            plt.imshow(depth_recon.reshape((width, height, 1)))
+            plt.imshow(depth_recon.reshape((512, 512, 1)))
             plt.colorbar()
             plt.savefig(str(i).zfill(6) + "depth")
             plt.close()
 
-            plt.imshow(jnp.abs(depth_recon.reshape((width, height)) - jnp.nan_to_num(depths[0])))
-            plt.colorbar()
-            plt.savefig(str(i).zfill(6) + "depth_diff")
-            plt.close()
+            # plt.imshow(jnp.abs(depth_recon.reshape((400, 400)) - jnp.nan_to_num(depths[0])))
+            # plt.colorbar()
+            # plt.savefig(str(i).zfill(6) + "depth_diff")
+            # plt.close()

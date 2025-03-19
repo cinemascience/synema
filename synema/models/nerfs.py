@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
@@ -76,15 +78,25 @@ class TinyNeRFModel(nn.Module):
         return raw2output(x)
 
 
-class VeryTinyNeRFModel(nn.Module):
-    r"""Very tiny NeRF model from nerf-pytorch, https://github.com/krrish94/nerf-pytorch"""
+@dataclass
+class NeRF(nn.Module):
+    aabb: jnp.array = None
 
-    num_hidden_features: int = 256
+    def normalize_points(self, input_points):
+        input_points = input_points - self.aabb[0]
+        input_points = input_points / (self.aabb[1] - self.aabb[0])
+        return input_points
+
+
+class VeryTinyNeRFModel(NeRF):
+    r"""Very tiny NeRF model from nerf-pytorch, https://github.com/krrish94/nerf-pytorch"""
+    num_hidden_features: int = 128
     num_encoding_functions: int = 6
     position_encoder: PositionalEncodingNeRF = PositionalEncodingNeRF(num_encoding_functions)
 
     @nn.compact
     def __call__(self, input_points, *args, **kwargs):
+        input_points = self.normalize_points(input_points)
         x = self.position_encoder(input_points)
         for i in range(3):
             x = nn.Dense(features=self.num_hidden_features)(x)
@@ -93,18 +105,20 @@ class VeryTinyNeRFModel(nn.Module):
         return raw2output(x)
 
 
-class InstantNGP(nn.Module):
+class InstantNGP(NeRF):
     r"""
     Model from the InstantNGP paper https://arxiv.org/abs/2201.05989 with modification as
      implemented by nerfstudio.
     """
     num_hidden_features: int = 64
     high_dynamics: bool = False
-    position_encoder: nn.Module = HashGridEncoder(num_levels=8, table_size=2 ** 19, feature_dims=4)
+    position_encoder: nn.Module = HashGridEncoder(num_levels=16, table_size=2 ** 19,
+                                                  feature_dims=2, max_resolution=2048)
     view_encoder: nn.Module = SphericalHarmonic4thEncoder()
 
     @nn.compact
     def __call__(self, input_points, input_views):
+        input_points = self.normalize_points(input_points)
         encoded_points = self.position_encoder(input_points)
 
         # density MLP, two layers of ReLU
@@ -136,9 +150,8 @@ class InstantNGP(nn.Module):
         return colors, densities
 
 
-class SirenNeRFModel(nn.Module):
-    num_hidden_layers: int = 4
-    num_hidden_features: int = 128
+class SirenNeRFModel(NeRF):
+    num_hidden_features: int = 64
     omega_0: float = 30.
     position_encoder: nn.Module = PositionalEncodingNeRF(num_frequencies=10)
     view_encoder: nn.Module = SphericalHarmonic4thEncoder()
@@ -150,10 +163,12 @@ class SirenNeRFModel(nn.Module):
 
     @nn.compact
     def __call__(self, input_points, input_views):
+        input_points = self.normalize_points(input_points)
         encoded_points = self.position_encoder(input_points)
 
         # Note: it is empirically found that the number of density layers
-        # need to be larger than the number of color layers.
+        # needs to be larger than the number of color layers.
+        # Otherwise, there are floats in the reconstructed depth image.
         # density MLP, 3 layers of SIREN
         x = Sine(hidden_features=self.num_hidden_features, is_first=True)(encoded_points)
         x = Sine(hidden_features=self.num_hidden_features)(x)
@@ -175,13 +190,14 @@ class SirenNeRFModel(nn.Module):
         return colors, densities
 
 
-class SirenRBNeRFModel(nn.Module):
+class SirenRBNeRFModel(NeRF):
     num_hidden_features: int = 64
     position_encoder: nn.Module = PositionalEncodingNeRF(num_frequencies=10)
     view_encoder: nn.Module = SphericalHarmonic4thEncoder()
 
     @nn.compact
     def __call__(self, input_points, input_views):
+        input_points = self.normalize_points(input_points)
         encoded_points = self.position_encoder(input_points)
 
         x = Sine(hidden_features=self.num_hidden_features, is_first=True)(encoded_points)
