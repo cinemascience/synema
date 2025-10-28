@@ -8,7 +8,8 @@ import optax
 from flax.training.train_state import TrainState
 from matplotlib import pyplot as plt
 from tqdm import tqdm
-
+import numpy as np
+import pyvista as pv
 from synema.models.cinema import CinemaRGBAImage
 from synema.renderers.ray_gen import Parallel
 from synema.renderers.rays import RayBundle
@@ -17,17 +18,20 @@ from synema.samplers.pixel import Dense, UniformRandom
 
 
 def readCinemaDatabase():
-    with open('/home/ollie/PycharmProjects/imdb_nerf/asteroid_cinema.cdb/data.csv', 'r', newline='') as csvfile:
+    with open('/home/ollie/PycharmProjects/imdb_nerf/examples/cube_cinema.cdb/data.csv', 'r', newline='') as csvfile:
         reader = csv.DictReader(csvfile, delimiter=',')
 
+        viewport_heights = []
         poses = []
         images = []
-
+    
         for row in reader:
-            h5file = h5py.File('/home/ollie/PycharmProjects/imdb_nerf/asteroid_cinema.cdb/' + row['FILE'], 'r')
+            h5file = h5py.File('/home/ollie/PycharmProjects/imdb_nerf/examples/cube_cinema.cdb/' + row['FILE'], 'r')
             meta = h5file.get('meta')
 
             camera_height = numpy.array(meta['CameraHeight'])  # not used by color image exporter
+            viewport_heights.append(camera_height)
+
             camera_dir = numpy.array(meta['CameraDir'])
             camera_pos = numpy.array(meta['CameraPos'])
             camera_near_far = numpy.array(meta['CameraNearFar'])  # not used by color image exporter
@@ -56,10 +60,11 @@ def readCinemaDatabase():
             image = numpy.array(channels['rgba'], dtype=numpy.float32) / 255.
             images.append(image)
 
+        viewport_heights = numpy.stack(viewport_heights, axis=0)
         poses = numpy.stack(poses, axis=0)
         images = numpy.stack(images, axis=0)
 
-        return poses, images
+        return viewport_heights, poses, images
 
 
 def create_train_steps(key, model, optimizer):
@@ -88,7 +93,7 @@ def create_train_steps(key, model, optimizer):
 
 
 if __name__ == '__main__':
-    poses, images = readCinemaDatabase()
+    viewport_heights, poses, images = readCinemaDatabase()
     height, width = images.shape[1], images.shape[2]
 
     plt.imshow(images[-1])
@@ -97,7 +102,7 @@ if __name__ == '__main__':
 
     t_near = 0.
     t_far = 1.
-    viewport_height = 1.
+
     key = jax.random.PRNGKey(0)
     model = CinemaRGBAImage()
 
@@ -111,10 +116,10 @@ if __name__ == '__main__':
                                   height=height,
                                   n_samples=4096)
 
-    ray_generator = Parallel(width=width, height=height, viewport_height=viewport_height)
+    ray_generator = Parallel(width=width, height=height, viewport_height=viewport_heights[0])
     renderer = Hierarchical()
 
-    pbar = tqdm(range(5000))
+    pbar = tqdm(range(1000))
     for i in pbar:
         key, subkey = jax.random.split(key)
         image_idx = jax.random.randint(subkey, shape=(1,), minval=1, maxval=images.shape[0])[0]
@@ -137,7 +142,7 @@ if __name__ == '__main__':
 
         if i % 100 == 0:
             pixel_coordinates_infer = Dense(width=width, height=height)()
-            ray_bundle = Parallel(width, height, viewport_height)(pixel_coordinates_infer, poses[-1], t_near, t_far)
+            ray_bundle = Parallel(width, height, viewport_heights[0])(pixel_coordinates_infer, poses[-1], t_near, t_far)
 
             key, _ = jax.random.split(key)
             _, image_recon, alpha_recon, depth_recon = renderer(model.bind(state.params),
@@ -152,3 +157,32 @@ if __name__ == '__main__':
             plt.colorbar()
             plt.savefig(str(i).zfill(6) + "depth")
             plt.close()
+
+    # generate the vti
+    # Recreate 100^3 grid in [-0.5, 0.5]^3
+    grid_res = 100
+    x = np.linspace(-1, 1, grid_res+1)
+    y = np.linspace(-1, 1, grid_res+1)
+    z = np.linspace(-1, 1, grid_res+1)
+    xx, yy, zz = np.meshgrid(x, y, z, indexing='ij')
+    points = np.stack([zz.ravel(), yy.ravel(), xx.ravel()], axis=-1)
+    print(points.shape)
+
+    grid_res = 100
+    spacing = (2.0 / grid_res, 2.0 / grid_res, 2.0 / grid_res)
+    origin = (-1, -1, -1)
+
+    # Create UniformGrid
+    grid = pv.ImageData()
+    grid.dimensions = (grid_res+1, grid_res+1, grid_res+1)
+    grid.origin = origin
+    grid.spacing = spacing
+
+
+    field_fun = model.bind(state.params)
+    array_of_rgb, array_of_density = field_fun(points, points)
+
+    grid["density"] = array_of_density
+    grid["rgb"] = array_of_rgb
+
+    grid.save("cube_density_reconst.vti")
