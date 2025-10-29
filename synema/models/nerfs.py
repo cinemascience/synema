@@ -81,7 +81,8 @@ class TinyNeRFModel(nn.Module):
 @dataclass
 class NeRF(nn.Module):
     aabb: jnp.array = None
-
+    # normalize input coordinates to the range of [0, 1]^3 to work with SIREN
+    # and HashGrid.
     def normalize_points(self, input_points):
         input_points = input_points - self.aabb[0]
         input_points = input_points / (self.aabb[1] - self.aabb[0])

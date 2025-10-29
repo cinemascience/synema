@@ -1,25 +1,15 @@
 import flax.linen as nn
 import jax.numpy as jnp
 import jax
+
+from synema.models.nerfs import NeRF
 from synema.encoders.frequency import PositionalEncodingNeRF
 from synema.encoders.hashgrid import HashGridEncoder
 from synema.encoders.sh4 import SphericalHarmonic4thEncoder
 from synema.models.siren import Siren, Sine
 
 
-class Cinema(nn.Module):
-    @staticmethod
-    def normalize_points(input_points):
-        # We constructed the columns of the camera pose matrix for Cinema
-        # database as normalized vectors, depth values are also in the range
-        # of [0, 1], making the points coordinates in the bbox of [-1, 1],
-        # re-normalize to [0, 1] for hashgrid encoding.
-        input_points = input_points + jnp.ones_like(input_points)
-        input_points = input_points / 2.
-        return input_points
-
-
-class CinemaRGBAImage(Cinema):
+class CinemaRGBAImage(NeRF):
     num_hidden_features: int = 64
     omega_0: float = 30.
     position_encoder: nn.Module = PositionalEncodingNeRF(num_frequencies=10)
@@ -59,7 +49,7 @@ class CinemaRGBAImage(Cinema):
         return colors, densities
 
 
-class CinemaScalarImage(Cinema):
+class CinemaScalarImage(NeRF):
     num_hidden_features = 64
     # When using SIREN, the hash_init_scale needs to be larger than described
     # in the InstantNGP paper to prevent vanishing gradient.
