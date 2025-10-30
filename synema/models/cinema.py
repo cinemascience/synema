@@ -31,7 +31,6 @@ class CinemaRGBAImage(NeRF):
         # density MLP, 2 layers of SIREN
         x = Sine(hidden_features=self.num_hidden_features, is_first=True)(encoded_points)
         x = Sine(hidden_features=self.num_hidden_features)(x)
-        x = Sine(hidden_features=self.num_hidden_features)(x)
         x = nn.Dense(features=16, kernel_init=self.init_last)(x)
 
         # we use relu instead of exp since we do want density == 0 for empty space.
@@ -41,7 +40,6 @@ class CinemaRGBAImage(NeRF):
         encoded_dir = self.view_encoder(input_views)
         x = jnp.concatenate([x[..., 1:], encoded_dir], axis=-1)
 
-        x = Sine(hidden_features=self.num_hidden_features)(x)
         x = Sine(hidden_features=self.num_hidden_features)(x)
         x = nn.Dense(features=3, kernel_init=self.init_last)(x)
 
