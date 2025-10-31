@@ -21,7 +21,18 @@ def raw2output(x: ArrayLike) -> (ArrayLike, ArrayLike):
     return colors, density
 
 
-class NeRFModel(nn.Module):
+@dataclass
+class NeRF(nn.Module):
+    aabb: jnp.array = None
+    # normalize input coordinates to the range of [0, 1]^3 to work with SIREN
+    # and HashGrid.
+    def normalize_points(self, input_points):
+        input_points = input_points - self.aabb[0]
+        input_points = input_points / (self.aabb[1] - self.aabb[0])
+        return input_points
+
+
+class NeRFModel(NeRF):
     r"""NeRF model as described in the original paper https://arxiv.org/abs/2003.08934"""
 
     num_hidden_layers: int = 8
@@ -32,6 +43,7 @@ class NeRFModel(nn.Module):
 
     @nn.compact
     def __call__(self, input_points, input_views=None):
+        input_points = self.normalize_points(input_points)
         input_points = self.position_encoder(input_points)
         x = input_points
         for i in range(self.num_hidden_layers):
@@ -57,7 +69,7 @@ class NeRFModel(nn.Module):
         return raw2output(x)
 
 
-class TinyNeRFModel(nn.Module):
+class TinyNeRFModel(NeRF):
     r"""Simplified NeRF Model from https://github.com/bmild/nerf/blob/master/tiny_nerf.ipynb that
     does not use view directions as an input"""
 
@@ -67,6 +79,7 @@ class TinyNeRFModel(nn.Module):
 
     @nn.compact
     def __call__(self, input_points, *args, **kwargs):
+        input_points = self.normalize_points(input_points)
         input_points = PositionalEncodingNeRF()(input_points) if self.apply_positional_encoding else input_points
         x = input_points
         for i in range(self.num_hidden_layers):
@@ -76,17 +89,6 @@ class TinyNeRFModel(nn.Module):
                 x = jnp.concatenate([x, input_points], axis=-1)
         x = nn.Dense(features=4)(x)
         return raw2output(x)
-
-
-@dataclass
-class NeRF(nn.Module):
-    aabb: jnp.array = None
-    # normalize input coordinates to the range of [0, 1]^3 to work with SIREN
-    # and HashGrid.
-    def normalize_points(self, input_points):
-        input_points = input_points - self.aabb[0]
-        input_points = input_points / (self.aabb[1] - self.aabb[0])
-        return input_points
 
 
 class VeryTinyNeRFModel(NeRF):
