@@ -18,23 +18,27 @@ from synema.samplers.pixel import Dense, UniformRandom
 
 
 def readCinemaDatabase():
-    with open('/home/ollie/PycharmProjects/imdb_nerf/examples/cube_cinema.cdb/data.csv', 'r', newline='') as csvfile:
+    with open('/home/ollie/PycharmProjects/imdb_nerf/examples/tangle_cinema.cdb/data.csv', 'r', newline='') as csvfile:
         reader = csv.DictReader(csvfile, delimiter=',')
 
         viewport_heights = []
+        nears_fars = []
         poses = []
         images = []
     
         for row in reader:
-            h5file = h5py.File('/home/ollie/PycharmProjects/imdb_nerf/examples/cube_cinema.cdb/' + row['FILE'], 'r')
+            h5file = h5py.File('/home/ollie/PycharmProjects/imdb_nerf/examples/tangle_cinema.cdb/' + row['FILE'], 'r')
             meta = h5file.get('meta')
 
-            camera_height = numpy.array(meta['CameraHeight'])  # not used by color image exporter
+            camera_height = numpy.array(meta['CameraHeight'])
             viewport_heights.append(camera_height)
 
             camera_dir = numpy.array(meta['CameraDir'])
             camera_pos = numpy.array(meta['CameraPos'])
-            camera_near_far = numpy.array(meta['CameraNearFar'])  # not used by color image exporter
+
+            camera_near_far = numpy.array(meta['CameraNearFar'])
+            nears_fars.append(camera_near_far)
+
             camera_up = numpy.array(meta['CameraUp'])
 
             # construct camera orientation matrix
@@ -44,14 +48,11 @@ def readCinemaDatabase():
             camera_v = numpy.cross(camera_w, camera_u)
             camera_v = camera_v / numpy.linalg.norm(camera_v)
 
-            # normalize the bbox to [-0.5, 0.5]^3 to prevent vanishing gradient.
-            camera_pos_normalized = 0.5 * camera_w
-
             pose = numpy.zeros((4, 4))
             pose[:3, 0] = camera_u
             pose[:3, 1] = camera_v
             pose[:3, 2] = camera_w
-            pose[:3, 3] = camera_pos_normalized
+            pose[:3, 3] = camera_pos
             pose[3, 3] = 1
 
             poses.append(pose)
@@ -61,10 +62,11 @@ def readCinemaDatabase():
             images.append(image)
 
         viewport_heights = numpy.stack(viewport_heights, axis=0)
+        nears_fars = numpy.stack(nears_fars, axis=0)
         poses = numpy.stack(poses, axis=0)
         images = numpy.stack(images, axis=0)
 
-        return viewport_heights, poses, images
+        return viewport_heights, nears_fars, poses, images
 
 
 def create_train_steps(key, model, optimizer):
@@ -93,18 +95,20 @@ def create_train_steps(key, model, optimizer):
 
 
 if __name__ == '__main__':
-    viewport_heights, poses, images = readCinemaDatabase()
+    viewport_heights, nears_fars, poses, images = readCinemaDatabase()
     height, width = images.shape[1], images.shape[2]
 
     plt.imshow(images[-1])
     plt.savefig("rgb_gt")
     plt.close()
 
-    t_near = 0.
-    t_far = 1.
+    t_near = nears_fars[0][0]
+    t_far = nears_fars[0][1]
+
+    aabb = jnp.array([[-1, -1, -1], [1, 1, 1]])
 
     key = jax.random.PRNGKey(0)
-    model = CinemaRGBAImage()
+    model = CinemaRGBAImage(aabb=aabb)
 
     schedule_fn = optax.exponential_decay(init_value=1e-3, transition_begin=600,
                                           transition_steps=200, decay_rate=0.5)
@@ -185,4 +189,4 @@ if __name__ == '__main__':
     grid["density"] = array_of_density
     grid["rgb"] = array_of_rgb
 
-    grid.save("cube_density_reconst.vti")
+    grid.save("tangle_density_reconst.vti")
