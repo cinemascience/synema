@@ -9,7 +9,6 @@ from flax.training.train_state import TrainState
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 import numpy as np
-import pyvista as pv
 from synema.models.cinema import CinemaRGBAImage
 from synema.renderers.ray_gen import Parallel
 from synema.renderers.rays import RayBundle

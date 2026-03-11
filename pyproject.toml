@@ -34,10 +34,5 @@ dev = [
   "pytest>=8,<9",
 ]
 
-# Optional extras for GUI / visualization (found via import scan)
-gui = [
-  "pyvista>=0.40.0,<0.44.0",
-]
-
 [tool.setuptools.packages.find]
 include = ["synema*"]

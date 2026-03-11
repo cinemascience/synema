@@ -1,3 +1,0 @@
-Example / visualization dependencies
-
-pyvista>=0.40.0,<0.44.0
