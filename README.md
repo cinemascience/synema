@@ -56,9 +56,7 @@ slower).
 -   **`data/`** --- Example assets and/or helper data\
 -   **`pyproject.toml`** --- Modern Python packaging (PEP 621
     compliant)\
--   **`requirements-dev.txt`** --- Development tooling dependencies\
--   **`requirements-examples.txt`** --- Optional example / visualization
-    dependencies\
+-   **`requirements-dev.txt`** --- Development tooling dependencies\ 
 -   **`license.md`** --- Repository license
 
 ------------------------------------------------------------------------
@@ -84,67 +82,42 @@ pip install -e .
 
 ------------------------------------------------------------------------
 
-## Optional Extras (Recommended)
-
-Synema provides optional dependency groups defined in `pyproject.toml`.
-
-### Development tools
-
-Includes testing, linting, and packaging utilities:
-
-``` bash
-pip install -e .[dev]
-```
-
-Equivalent:
-
-``` bash
-pip install -r requirements-dev.txt
-```
-
-------------------------------------------------------------------------
-
-### Examples
-
-To run PyVista-based examples:
-
-``` bash
-pip install -e .[gui]
-```
-
-Equivalent:
-
-``` bash
-pip install -r requirements-examples.txt
-```
-
-------------------------------------------------------------------------
-
-## Full Development Setup
-
-``` bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -U pip
-pip install -e .[dev,gui]
-```
-
-------------------------------------------------------------------------
-
 ## Quick Start
 
-Typical workflow:
+The repository includes two example Cinema databases:
 
-1.  Train a model on a Cinema dataset
-2.  Render novel views
-3.  Export results for Cinema visualization
+-   **`dragon_elevation.cdb`** --- scalar image database\
+-   **`tangle_rgb.cdb`** --- RGB image database
 
-Example (see `examples/` for actual scripts):
+These are used by the example scripts in the `examples/` directory:
+
+-   `cinema_scalar_image.py` → uses `dragon_elevation.cdb`
+-   `cinema_rgb_image.py` → uses `tangle_rgb.cdb`
+
+> The database paths are already hardcoded inside the example scripts.\
+> You do **not** need to pass the database path via the command line.
+
+### Run Scalar Image Example
 
 ``` bash
-python examples/train.py --cinema /path/to/cinema_db --out runs/my_run
-python examples/render.py --run runs/my_run --trajectory spiral --out renders/my_run_spiral
+python examples/cinema_scalar_image.py
 ```
+
+### Run RGB Image Example
+
+``` bash
+python examples/cinema_rgb_image.py
+```
+
+These scripts will:
+
+1.  Load the corresponding Cinema database\
+2.  Initialize the JAX/Flax NeRF-style model\
+3.  Train or evaluate depending on script configuration\
+4.  Produce rendered outputs / visualizations
+
+Modify the script configuration directly if you want to change training
+parameters, output paths, or rendering settings.
 
 ------------------------------------------------------------------------
 
