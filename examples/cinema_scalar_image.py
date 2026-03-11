@@ -18,8 +18,8 @@ from synema.samplers.pixel import UniformRandom, Dense
 
 
 def readCinemaDatabase():
-    with open('../data/dragon.cdb/data.csv', 'r', newline='') as csvfile:
-        reader = csv.reader(csvfile, delimiter=',')
+    with open("../data/dragon.cdb/data.csv", "r", newline="") as csvfile:
+        reader = csv.reader(csvfile, delimiter=",")
         next(reader, None)  # skip header
 
         poses = []
@@ -27,14 +27,14 @@ def readCinemaDatabase():
         scalars = []
 
         for row in reader:
-            h2file = h5py.File('../data/dragon.cdb/' + row[2], 'r')
-            meta = h2file.get('meta')
+            h2file = h5py.File("../data/dragon.cdb/" + row[2], "r")
+            meta = h2file.get("meta")
 
-            camera_focal = numpy.array(meta['CameraHeight'])
-            camera_dir = numpy.array(meta['CameraDir'])
-            camera_pos = numpy.array(meta['CameraPos'])
-            camera_near_far = numpy.array(meta['CameraNearFar'])
-            camera_up = numpy.array(meta['CameraUp'])
+            camera_focal = numpy.array(meta["CameraHeight"])
+            camera_dir = numpy.array(meta["CameraDir"])
+            camera_pos = numpy.array(meta["CameraPos"])
+            camera_near_far = numpy.array(meta["CameraNearFar"])
+            camera_up = numpy.array(meta["CameraUp"])
 
             # construct camera orientation matrix
             camera_w = -camera_dir / numpy.linalg.norm(camera_dir)
@@ -55,12 +55,12 @@ def readCinemaDatabase():
 
             poses.append(pose)
 
-            channels = h2file.get('channels')
+            channels = h2file.get("channels")
 
-            depth = numpy.array(channels['Depth'])
+            depth = numpy.array(channels["Depth"])
             depths.append(depth)
 
-            elevation = numpy.array(channels['Elevation'])
+            elevation = numpy.array(channels["Elevation"])
             scalars.append(elevation)
 
             h2file.close()
@@ -73,20 +73,27 @@ def readCinemaDatabase():
 
 
 def create_train_steps(key, model, optimizer):
-    init_state = TrainState.create(apply_fn=model.apply, params=model.init(key, jnp.empty((1024, 3))), tx=optimizer)
+    init_state = TrainState.create(
+        apply_fn=model.apply, params=model.init(key, jnp.empty((1024, 3))), tx=optimizer
+    )
     train_renderer = DepthGuidedTrain()
 
     def loss_fn(params, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):
-        scalar, alpha, depth = train_renderer(field_fn=model.bind(params),
-                                              ray_bundle=ray_bundle,
-                                              rng_key=key,
-                                              depth_gt=targets['depth']).values()
-        return (jnp.mean(optax.l2_loss(scalar, targets['scalar'])) +
-                1.e-3 * jnp.mean(jnp.abs(depth - jnp.nan_to_num(targets['depth']))))
+        scalar, alpha, depth = train_renderer(
+            field_fn=model.bind(params),
+            ray_bundle=ray_bundle,
+            rng_key=key,
+            depth_gt=targets["depth"],
+        ).values()
+        return jnp.mean(optax.l2_loss(scalar, targets["scalar"])) + 1.0e-3 * jnp.mean(
+            jnp.abs(depth - jnp.nan_to_num(targets["depth"]))
+        )
 
     @jax.jit
     def train_step(state, ray_bundle: RayBundle, targets, key: jax.random.PRNGKey):
-        loss_val, grads = jax.value_and_grad(loss_fn)(state.params, ray_bundle, targets, key)
+        loss_val, grads = jax.value_and_grad(loss_fn)(
+            state.params, ray_bundle, targets, key
+        )
         new_state = state.apply_gradients(grads=grads)
         return new_state, loss_val
 
@@ -98,26 +105,29 @@ if __name__ == "__main__":
     height, width = scalars.shape[1], scalars.shape[2]
     scalars = jnp.nan_to_num(scalars)
 
-    t_near = 0.
-    t_far = 1.
+    t_near = 0.0
+    t_far = 1.0
+
+    aabb = jnp.array([[-1, -1, -1], [1, 1, 1]])
 
     depths = jnp.where(depths == 1.0, jnp.nan, depths)
 
     plt.imshow(scalars[0])
     plt.colorbar()
-    plt.savefig('scalar_gt.png')
+    plt.savefig("scalar_gt.png")
     plt.close()
 
     plt.imshow(jnp.nan_to_num(depths[0]))
     plt.colorbar()
-    plt.savefig('depth_gt.png')
+    plt.savefig("depth_gt.png")
     plt.close()
 
     key = jax.random.PRNGKey(0)
-    model = CinemaScalarImage()
+    model = CinemaScalarImage(aabb=aabb)
 
-    schedule_fn = optax.exponential_decay(init_value=1e-3, transition_begin=600,
-                                          transition_steps=200, decay_rate=0.5)
+    schedule_fn = optax.exponential_decay(
+        init_value=1e-3, transition_begin=600, transition_steps=200, decay_rate=0.5
+    )
     optimizer = optax.adam(learning_rate=schedule_fn)
 
     train_step, state = create_train_steps(key, model, optimizer)
@@ -136,19 +146,29 @@ if __name__ == "__main__":
     for i in pbar:
         # print(jax.local_devices()[0].memory_stats())
         key, subkey = jax.random.split(key)
-        image_idx = jax.random.randint(subkey, shape=(1,), minval=1, maxval=scalars.shape[0])[0]
+        image_idx = jax.random.randint(
+            subkey, shape=(1,), minval=1, maxval=scalars.shape[0]
+        )[0]
 
         pose = poses[image_idx]
         depth = depths[image_idx]
         scalar = scalars[image_idx]
 
         key, subkey = jax.random.split(key)
-        pixel_coordinates = pixel_sampler()#(rng=subkey)
+        pixel_coordinates = pixel_sampler()  # (rng=subkey)
 
         ray_bundle = ray_generator(pixel_coordinates, pose, t_near, t_far)
         targets = {
-            'scalar': scalar[pixel_coordinates[:, 0].astype(int), pixel_coordinates[:, 1].astype(int), None],
-            'depth': depth[pixel_coordinates[:, 0].astype(int), pixel_coordinates[:, 1].astype(int), None]
+            "scalar": scalar[
+                pixel_coordinates[:, 0].astype(int),
+                pixel_coordinates[:, 1].astype(int),
+                None,
+            ],
+            "depth": depth[
+                pixel_coordinates[:, 0].astype(int),
+                pixel_coordinates[:, 1].astype(int),
+                None,
+            ],
         }
 
         key, subkey = jax.random.split(key)
@@ -157,15 +177,18 @@ if __name__ == "__main__":
 
         if i % 100 == 0:
             pixel_coordinates_inf = Dense(width=512, height=512)()
-            ray_bundle = Parallel(width=512, height=512, viewport_height=1)(pixel_coordinates_inf, poses[0], t_near, t_far)
+            ray_bundle = Parallel(width=512, height=512, viewport_height=1)(
+                pixel_coordinates_inf, poses[0], t_near, t_far
+            )
 
             key, subkey = jax.random.split(key)
-            _, scalar_recon, _, depth_recon = renderer(model.bind(state.params), model.bind(state.params),
-                                                       ray_bundle, subkey).values()
+            _, scalar_recon, _, depth_recon = renderer(
+                model.bind(state.params), model.bind(state.params), ray_bundle, subkey
+            ).values()
 
             plt.imshow(scalar_recon.reshape((512, 512)))
             plt.colorbar()
-            plt.savefig(str(i).zfill(6) + 'scalar_recon.png')
+            plt.savefig(str(i).zfill(6) + "scalar_recon.png")
             plt.close()
 
             plt.imshow(depth_recon.reshape((512, 512, 1)))
