@@ -18,7 +18,7 @@ from synema.samplers.pixel import UniformRandom, Dense
 
 
 def readCinemaDatabase():
-    with open("../data/dragon.cdb/data.csv", "r", newline="") as csvfile:
+    with open("../data/dragon_elevation.cdb/data.csv", "r", newline="") as csvfile:
         reader = csv.reader(csvfile, delimiter=",")
         next(reader, None)  # skip header
 
@@ -27,7 +27,7 @@ def readCinemaDatabase():
         scalars = []
 
         for row in reader:
-            h2file = h5py.File("../data/dragon.cdb/" + row[2], "r")
+            h2file = h5py.File("../data/dragon_elevation.cdb/" + row[2], "r")
             meta = h2file.get("meta")
 
             camera_focal = numpy.array(meta["CameraHeight"])
@@ -108,7 +108,7 @@ if __name__ == "__main__":
     t_near = 0.0
     t_far = 1.0
 
-    aabb = jnp.array([[-1, -1, -1], [1, 1, 1]])
+    aabb = ((-1, -1, -1), (1, 1, 1))
 
     depths = jnp.where(depths == 1.0, jnp.nan, depths)
 

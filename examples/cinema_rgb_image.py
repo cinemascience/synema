@@ -114,7 +114,7 @@ if __name__ == "__main__":
     t_near = nears_fars[0][0]
     t_far = nears_fars[0][1]
 
-    aabb = jnp.array([[-1, -1, -1], [1, 1, 1]])
+    aabb = ((-1, -1, -1), (1, 1, 1))
 
     key = jax.random.PRNGKey(0)
     model = CinemaRGBAImage(aabb=aabb)

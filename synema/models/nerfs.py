@@ -23,12 +23,13 @@ def raw2output(x: ArrayLike) -> (ArrayLike, ArrayLike):
 
 @dataclass
 class NeRF(nn.Module):
-    aabb: jnp.array = None
+    # aabb: jnp.array = None
+    aabb: tuple[tuple[int, int, int], tuple[int, int, int]]
     # normalize input coordinates to the range of [0, 1]^3 to work with SIREN
     # and HashGrid.
     def normalize_points(self, input_points):
-        input_points = input_points - self.aabb[0]
-        input_points = input_points / (self.aabb[1] - self.aabb[0])
+        input_points = input_points - jnp.array(self.aabb[0])
+        input_points = input_points / (jnp.array(self.aabb[1]) - jnp.array(self.aabb[0]))
         return input_points
 
 
